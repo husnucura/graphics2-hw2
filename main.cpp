@@ -59,9 +59,10 @@ GLint exposureLoc;
 GLint gammaLoc;
 
 bool firstMouse = true;
+glm::quat cameraOrientation = glm::quat(1, 0, 0, 0); // Identity quaternion
 float lastX = gWidth / 2.0f;
 float lastY = gHeight / 2.0f;
-float yaw = -90.0f;
+float yaw = 0.0f;
 float pitch = 0.0f;
 float fov = 45.0f;
 bool middleMousePressed = false;
@@ -814,7 +815,7 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 		lastX = xpos;
 		lastY = ypos;
 	}
-	float xoffset = xpos - lastX;
+	float xoffset = lastX - xpos;
 	float yoffset = lastY - ypos;
 	lastX = xpos;
 	lastY = ypos;
@@ -832,13 +833,19 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	if (pitch < -89.0f)
 		pitch = -89.0f;
 
-	// Update camera vectors
-	glm::vec3 front;
-	front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-	front.y = sin(glm::radians(pitch));
-	front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-	eyeGaze = glm::normalize(front);
-	eyeUp = glm::vec3(0.0f, 1.0f, 0.0f); // Keep up vector fixed to world up
+	float yaw_rad = glm::radians(yaw);
+	float pitch_rad = glm::radians(pitch);
+
+	glm::quat yawQuat = glm::angleAxis(yaw_rad, glm::vec3(0.0f, 1.0f, 0.0f));
+	glm::quat pitchQuat = glm::angleAxis(pitch_rad, glm::vec3(1.0f, 0.0f, 0.0f));
+
+	glm::quat finalOrientation = yawQuat * pitchQuat;
+
+	// Calculate front vector from quaternion
+	eyeGaze = finalOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+
+	// Calculate up vector from quaternion
+	eyeUp = finalOrientation * glm::vec3(0.0f, 1.0f, 0.0f);
 }
 void renderInfo()
 {
