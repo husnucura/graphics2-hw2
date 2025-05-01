@@ -19,10 +19,13 @@
 
 #include <map>
 #include <ft2build.h>
+#include <format>
+
 #include FT_FREETYPE_H
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#define format_float(val) std::format("{:.2f}", val)
 
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
@@ -44,6 +47,24 @@ glm::mat4 modelingMatrix;
 glm::vec3 eyePos(0, 0, 0);
 glm::vec3 eyeGaze(0, 0, -1);
 glm::vec3 eyeUp(0, 1, 0);
+
+GLuint cubemapTexture;
+GLuint cubemapVAO, cubemapVBO;
+GLuint cubemapProgram;
+
+float exposure = 1.0f;
+float gamma_val = 2.2f;
+
+GLint exposureLoc;
+GLint gammaLoc;
+
+bool firstMouse = true;
+float lastX = gWidth / 2.0f;
+float lastY = gHeight / 2.0f;
+float yaw = -90.0f;
+float pitch = 0.0f;
+float fov = 45.0f;
+bool middleMousePressed = false;
 
 /// Holds all state information relevant to a character as loaded using FreeType
 struct Character
@@ -373,6 +394,48 @@ void initFonts(int windowWidth, int windowHeight)
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
+unsigned int loadCubemap()
+{
+	std::string folder = "cubemap3/";
+	std::vector<std::string> faces = {
+		"px.hdr",
+		"nx.hdr",
+		"py.hdr",
+		"ny.hdr",
+		"pz.hdr",
+		"nz.hdr"};
+
+	unsigned int textureID;
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
+
+	int width, height, nrChannels;
+	for (unsigned int i = 0; i < faces.size(); i++)
+	{
+		float *data = stbi_loadf((folder + faces[i]).c_str(), &width, &height, &nrChannels, 0);
+		if (data)
+		{
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i,
+						 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, data);
+			stbi_image_free(data);
+			std::cout << "Loaded cubemap face: " << faces[i] << std::endl;
+		}
+		else
+		{
+			std::cout << "Cubemap texture failed to load at path: " << faces[i] << std::endl;
+			stbi_image_free(data);
+			return 1;
+		}
+	}
+
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+	return textureID;
+}
 
 void initTexture()
 {
@@ -571,56 +634,144 @@ void initVBO()
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(gVertexDataSizeInBytes[t] + gNormalDataSizeInBytes[t]));
 	}
 }
+void initCubemap()
+{
+	float cubeVertices[] = {
+		-1.0f, 1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
+		1.0f, -1.0f, -1.0f,
+		1.0f, -1.0f, -1.0f,
+		1.0f, 1.0f, -1.0f,
+		-1.0f, 1.0f, -1.0f,
 
+		-1.0f, -1.0f, 1.0f,
+		-1.0f, -1.0f, -1.0f,
+		-1.0f, 1.0f, -1.0f,
+		-1.0f, 1.0f, -1.0f,
+		-1.0f, 1.0f, 1.0f,
+		-1.0f, -1.0f, 1.0f,
+
+		1.0f, -1.0f, -1.0f,
+		1.0f, -1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, -1.0f,
+		1.0f, -1.0f, -1.0f,
+
+		-1.0f, -1.0f, 1.0f,
+		-1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, -1.0f, 1.0f,
+		-1.0f, -1.0f, 1.0f,
+
+		-1.0f, 1.0f, -1.0f,
+		1.0f, 1.0f, -1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		-1.0f, 1.0f, 1.0f,
+		-1.0f, 1.0f, -1.0f,
+
+		-1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f, 1.0f,
+		1.0f, -1.0f, -1.0f,
+		1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f, 1.0f,
+		1.0f, -1.0f, 1.0f};
+
+	glGenVertexArrays(1, &cubemapVAO);
+	glGenBuffers(1, &cubemapVBO);
+	glBindVertexArray(cubemapVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, cubemapVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), &cubeVertices, GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+	cubemapTexture = loadCubemap();
+	GLuint vs_cubemap = createVS("vert_cubemap.glsl");
+	GLuint fs_cubemap = createFS("frag_cubemap.glsl");
+	cubemapProgram = glCreateProgram();
+	glAttachShader(cubemapProgram, vs_cubemap);
+	glAttachShader(cubemapProgram, fs_cubemap);
+	glLinkProgram(cubemapProgram);
+
+	// Get uniform locations
+	glUseProgram(cubemapProgram);
+	glUniform1i(glGetUniformLocation(cubemapProgram, "cubeSampler"), 0);
+	exposureLoc = glGetUniformLocation(cubemapProgram, "exposure");
+	gammaLoc = glGetUniformLocation(cubemapProgram, "gamma");
+}
 void init()
 {
 	ParseObj("armadillo.obj", 0);
-	ParseObj("quad.obj", 1);
-
 	glEnable(GL_DEPTH_TEST);
 	initTexture();
 	initShaders();
 	initVBO();
 	initFonts(gWidth, gHeight);
+	initCubemap();
 }
 
 void drawScene()
 {
+	glDepthFunc(GL_LEQUAL);
+	glUseProgram(cubemapProgram);
+
+	glm::mat4 view = glm::mat4(glm::mat3(viewingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+	glUniform1f(exposureLoc, exposure);
+	glUniform1f(gammaLoc, gamma_val);
+
+	glBindVertexArray(cubemapVAO);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+	glBindVertexArray(0);
+	glDepthFunc(GL_LESS); // Reset depth function to default
+
+	// Then draw the textured objects (armadillo)
+	glUseProgram(gProgram[0]);
 	glBindTexture(GL_TEXTURE_2D, texture);
 
-	for (size_t t = 0; t < 2; t++)
-	{
-		// Set the active program and the values of its uniform variables
-		glUseProgram(gProgram[t]);
-		glUniformMatrix4fv(projectionMatrixLoc[t], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
-		glUniformMatrix4fv(viewingMatrixLoc[t], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
-		glUniformMatrix4fv(modelingMatrixLoc[t], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-		glUniform3fv(eyePosLoc[t], 1, glm::value_ptr(eyePos));
+	glUniformMatrix4fv(projectionMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+	glUniformMatrix4fv(viewingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+	glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+	glUniform3fv(eyePosLoc[0], 1, glm::value_ptr(eyePos));
 
-		glBindVertexArray(vao[t]);
-
-		if (t == 1)
-			glDepthMask(GL_FALSE);
-
-		glDrawElements(GL_TRIANGLES, gFaces[t].size() * 3, GL_UNSIGNED_INT, 0);
-
-		if (t == 1)
-			glDepthMask(GL_TRUE);
-	}
+	glBindVertexArray(vao[0]);
+	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
 }
-
-void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color)
+void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color, bool right_aligned = false, bool bottom_aligned = false)
 {
+	// Calculate total width and height if alignment is enabled
+	GLfloat textWidth = 0.0f;
+	GLfloat maxHeight = 0.0f;
+
+	if (right_aligned || bottom_aligned)
+	{
+		for (char c : text)
+		{
+			Character ch = Characters[c];
+			textWidth += (ch.Advance >> 6) * scale; // advance in pixels
+			GLfloat h = ch.Size.y * scale;
+			if (h > maxHeight)
+				maxHeight = h;
+		}
+
+		if (right_aligned)
+			x -= textWidth;
+		if (bottom_aligned)
+			y += maxHeight;
+	}
+
 	// Activate corresponding render state
 	glUseProgram(gProgram[2]);
 	glUniform3f(glGetUniformLocation(gProgram[2], "textColor"), color.x, color.y, color.z);
 	glActiveTexture(GL_TEXTURE0);
 
-	// Iterate through all characters
-	std::string::const_iterator c;
-	for (c = text.begin(); c != text.end(); c++)
+	for (char c : text)
 	{
-		Character ch = Characters[*c];
+		Character ch = Characters[c];
 
 		GLfloat xpos = x + ch.Bearing.x * scale;
 		GLfloat ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
@@ -628,7 +779,6 @@ void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, gl
 		GLfloat w = ch.Size.x * scale;
 		GLfloat h = ch.Size.y * scale;
 
-		// Update VBO for each character
 		GLfloat vertices[6][4] = {
 			{xpos, ypos + h, 0.0, 0.0},
 			{xpos, ypos, 0.0, 1.0},
@@ -638,91 +788,95 @@ void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, gl
 			{xpos + w, ypos, 1.0, 1.0},
 			{xpos + w, ypos + h, 1.0, 0.0}};
 
-		// Render glyph texture over quad
 		glBindTexture(GL_TEXTURE_2D, ch.TextureID);
-
 		glBindVertexArray(vao[2]);
-		// Update content of VBO memory
+
 		glBindBuffer(GL_ARRAY_BUFFER, gTextVBO);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); // Be sure to use glBufferSubData and not glBufferData
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
 
-		// glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-		// Render quad
 		glDrawArrays(GL_TRIANGLES, 0, 6);
-		// Now advance cursors for next glyph (note that advance is number of 1/64 pixels)
 
-		x += (ch.Advance >> 6) * scale; // Bitshift by 6 to get value in pixels (2^6 = 64 (divide amount of 1/64th pixels by 64 to get amount of pixels))
+		x += (ch.Advance >> 6) * scale;
 	}
 
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+{
+	if (!middleMousePressed)
+		return;
+
+	if (firstMouse)
+	{
+
+		firstMouse = false;
+		lastX = xpos;
+		lastY = ypos;
+	}
+	float xoffset = xpos - lastX;
+	float yoffset = lastY - ypos;
+	lastX = xpos;
+	lastY = ypos;
+
+	float sensitivity = 0.1f;
+	xoffset *= sensitivity;
+	yoffset *= sensitivity;
+
+	yaw += xoffset;
+	pitch += yoffset;
+
+	// Constrain pitch to avoid screen flipping
+	if (pitch > 89.0f)
+		pitch = 89.0f;
+	if (pitch < -89.0f)
+		pitch = -89.0f;
+
+	// Update camera vectors
+	glm::vec3 front;
+	front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+	front.y = sin(glm::radians(pitch));
+	front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+	eyeGaze = glm::normalize(front);
+	eyeUp = glm::vec3(0.0f, 1.0f, 0.0f); // Keep up vector fixed to world up
+}
+void renderInfo()
+{
+	renderText("Test", 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
+	renderText("Exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
+}
 void display()
 {
-	glClearColor(0, 0, 0, 1);
-	glClearDepth(1.0f);
-	glClearStencil(0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
 	static float angle = 0;
-
 	float angleRad = (float)(angle / 180.0) * M_PI;
 
-	// Compute the modeling matrix
-
-	// modelingMatrix = glm::translate(glm::mat4(1.0), glm::vec3(0.0f, -0.4f, -5.0f));
-	// modelingMatrix = glm::rotate(modelingMatrix, angleRad, glm::vec3(0.0, 1.0, 0.0));
-	glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(-0.5f, -0.4f, -5.0f)); // same as above but more clear
-	// glm::mat4 matR = glm::rotate(glm::mat4(1.0), angleRad, glm::vec3(0.0, 1.0, 0.0));
+	// Compute the modeling matrix for the armadillo
+	glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(0.0f, 0.0f, -7.0f));
 	glm::mat4 matRx = glm::rotate<float>(glm::mat4(1.0), (-90. / 180.) * M_PI, glm::vec3(1.0, 0.0, 0.0));
 	glm::mat4 matRy = glm::rotate<float>(glm::mat4(1.0), (-90. / 180.) * M_PI, glm::vec3(0.0, 1.0, 0.0));
-	glm::mat4 matRz = glm::rotate<float>(glm::mat4(1.0), angleRad, glm::vec3(0.0, 0.0, 1.0));
-	modelingMatrix = matRy * matRx;
+	// modelingMatrix = matT * matRy * matRx;
+	modelingMatrix = matT;
 
 	// Let's make some alternating roll rotation
 	static float rollDeg = 0;
 	static float changeRoll = 2.5;
 	float rollRad = (float)(rollDeg / 180.f) * M_PI;
 	rollDeg += changeRoll;
-	if (rollDeg >= 10.f || rollDeg <= -10.f)
-	{
-		changeRoll *= -1.f;
-	}
-	glm::mat4 matRoll = glm::rotate<float>(glm::mat4(1.0), rollRad, glm::vec3(1.0, 0.0, 0.0));
 
-	// Let's make some pitch rotation
-	static float pitchDeg = 0;
-	static float changePitch = 0.1;
-	float startPitch = 0;
-	float endPitch = 90;
-	float pitchRad = (float)(pitchDeg / 180.f) * M_PI;
-	pitchDeg += changePitch;
-	if (pitchDeg >= endPitch)
-	{
-		changePitch = 0;
-	}
-	// glm::mat4 matPitch = glm::rotate<float>(glm::mat4(1.0), pitchRad, glm::vec3(0.0, 0.0, 1.0));
-	// modelingMatrix = matRoll * matPitch * modelingMatrix; // gimbal lock
-	// modelingMatrix = matPitch * matRoll * modelingMatrix;   // no gimbal lock
+	glm::mat4 matRoll = glm::rotate<float>(glm::mat4(1.0), rollRad, glm::vec3(0.0, 1.0, 0.0));
 
-	glm::quat q0(0, 1, 0, 0); // along x
-	glm::quat q1(0, 0, 1, 0); // along y
-	glm::quat q = glm::mix(q0, q1, (pitchDeg - startPitch) / (endPitch - startPitch));
+	modelingMatrix = modelingMatrix * matRoll;
 
-	float sint = sin(rollRad / 2);
-	glm::quat rollQuat(cos(rollRad / 2), sint * q.x, sint * q.y, sint * q.z);
-	glm::quat pitchQuat(cos(pitchRad / 2), 0, 0, 1 * sin(pitchRad / 2));
-	// modelingMatrix = matT * glm::toMat4(pitchQuat) * glm::toMat4(rollQuat) * modelingMatrix;
-	modelingMatrix = matT * glm::toMat4(rollQuat) * glm::toMat4(pitchQuat) * modelingMatrix; // roll is based on pitch
-
-	// cout << rollQuat.w << " " << rollQuat.x << " " << rollQuat.y << " " << rollQuat.z << endl;
-
-	// Draw the scene
 	drawScene();
 
+	// Draw text
 	glDisable(GL_DEPTH_TEST);
-	renderText("Test", 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
+	renderInfo();
 	glEnable(GL_DEPTH_TEST);
 
 	angle += 0.5;
@@ -738,26 +892,15 @@ void reshape(GLFWwindow *window, int w, int h)
 
 	glViewport(0, 0, w, h);
 
-	// glMatrixMode(GL_PROJECTION);
-	// glLoadIdentity();
-	// glOrtho(-10, 10, -10, 10, -10, 10);
-	// gluPerspective(45, 1, 1, 100);
-
-	// Use perspective projection
-
 	float fovyRad = (float)(45.0 / 180.0) * M_PI;
-	projectionMatrix = glm::perspective(fovyRad, 1.0f, 1.0f, 100.0f);
+	projectionMatrix = glm::perspective(fovyRad, (float)w / (float)h, 0.1f, 100.0f);
 
-	// Assume a camera position and orientation (camera is at
-	// (0, 0, 0) with looking at -z direction and its up vector pointing
-	// at +y direction)
-
+	// Update viewing matrix with current eyeGaze
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
-
-	// glMatrixMode(GL_MODELVIEW);
-	// glLoadIdentity();
+	glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(gWidth), 0.0f, static_cast<GLfloat>(gHeight));
+	glUseProgram(gProgram[2]);
+	glUniformMatrix4fv(glGetUniformLocation(gProgram[2], "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 }
-
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_Q && action == GLFW_PRESS)
@@ -767,6 +910,14 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	else if (key == GLFW_KEY_F && action == GLFW_PRESS)
 	{
 		// glShadeModel(GL_FLAT);
+	}
+	else if (key == GLFW_KEY_K)
+	{
+		if (action == GLFW_PRESS)
+		{
+			middleMousePressed = !middleMousePressed;
+			firstMouse = true;
+		}
 	}
 }
 
@@ -824,6 +975,7 @@ int main(int argc, char **argv) // Create Main Function For Bringing It All Toge
 
 	glfwSetKeyCallback(window, keyboard);
 	glfwSetWindowSizeCallback(window, reshape);
+	glfwSetCursorPosCallback(window, mouse_callback);
 
 	reshape(window, gWidth, gHeight); // need to call this once ourselves
 	mainLoop(window);				  // this does not return unless the window is closed
