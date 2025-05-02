@@ -30,7 +30,7 @@
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
 using namespace std;
-
+std::string currentRenderModeStr = "Default";
 GLuint vao[3];
 GLuint gProgram[3];
 GLuint texture;
@@ -52,6 +52,9 @@ GLuint cubemapTexture;
 GLuint cubemapVAO, cubemapVBO;
 GLuint cubemapProgram;
 
+GLuint quadVAO = 0, quadVBO = 0;
+GLuint fullscreenShaderProgram = 0;
+
 float exposure = 1.0f;
 float gamma_val = 2.2f;
 
@@ -66,6 +69,8 @@ float yaw = 0.0f;
 float pitch = 0.0f;
 float fov = 45.0f;
 bool middleMousePressed = false;
+GLuint gBufferShaderProgram;
+GLuint depthRBO;
 
 /// Holds all state information relevant to a character as loaded using FreeType
 struct Character
@@ -635,6 +640,127 @@ void initVBO()
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(gVertexDataSizeInBytes[t] + gNormalDataSizeInBytes[t]));
 	}
 }
+void initFullscreenQuad()
+{
+	// Only initialize once
+	if (quadVAO != 0)
+		return;
+
+	// Quad vertices: positions (x, y) and texture coords (u, v)
+	float quadVertices[] = {
+		// positions   // texCoords
+		-1.0f, 1.0f, 0.0f, 1.0f,
+		-1.0f, -1.0f, 0.0f, 0.0f,
+		1.0f, -1.0f, 1.0f, 0.0f,
+
+		-1.0f, 1.0f, 0.0f, 1.0f,
+		1.0f, -1.0f, 1.0f, 0.0f,
+		1.0f, 1.0f, 1.0f, 1.0f};
+
+	// Create VAO and VBO
+	glGenVertexArrays(1, &quadVAO);
+	glGenBuffers(1, &quadVBO);
+	glBindVertexArray(quadVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+	// Position attribute
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+
+	// TexCoord attribute
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+
+	glBindVertexArray(0);
+
+	// === Create Shader Program ===
+	GLuint vs = createVS("quad.vert"); // simple pass-through vertex shader
+	GLuint fs = createFS("quad.frag"); // sample texture and output color
+
+	fullscreenShaderProgram = glCreateProgram();
+	glAttachShader(fullscreenShaderProgram, vs);
+	glAttachShader(fullscreenShaderProgram, fs);
+	glLinkProgram(fullscreenShaderProgram);
+
+	// Check link status
+	GLint linked;
+	glGetProgramiv(fullscreenShaderProgram, GL_LINK_STATUS, &linked);
+	if (!linked)
+	{
+		GLchar log[1024];
+		glGetProgramInfoLog(fullscreenShaderProgram, sizeof(log), NULL, log);
+		std::cerr << "Fullscreen Shader Program link error:\n"
+				  << log << std::endl;
+	}
+
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+}
+
+GLuint gBuffer;
+GLuint gPosition, gNormal;
+
+void initGBuffer()
+{
+	glGenFramebuffers(1, &gBuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+
+	// Position buffer
+	glGenTextures(1, &gPosition);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+
+	// Normal buffer
+	glGenTextures(1, &gNormal);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
+
+	// Depth buffer	glGenRenderbuffers(1, &depthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, gWidth, gHeight);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+
+	// Set draw buffers
+	GLenum attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	glDrawBuffers(2, attachments);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "G-Buffer not complete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+void initGBufferShaders()
+{
+	GLuint vs = createVS("gBuffer.vert");
+	GLuint fs = createFS("gBuffer.frag");
+
+	gBufferShaderProgram = glCreateProgram();
+	glAttachShader(gBufferShaderProgram, vs);
+	glAttachShader(gBufferShaderProgram, fs);
+	glLinkProgram(gBufferShaderProgram);
+
+	GLint status;
+	glGetProgramiv(gBufferShaderProgram, GL_LINK_STATUS, &status);
+	if (status != GL_TRUE)
+	{
+		char buffer[512];
+		glGetProgramInfoLog(gBufferShaderProgram, 512, NULL, buffer);
+		std::cerr << "G-buffer shader program linking failed:\n"
+				  << buffer << std::endl;
+		exit(-1);
+	}
+
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+}
+
 void initCubemap()
 {
 	float cubeVertices[] = {
@@ -710,6 +836,115 @@ void init()
 	initVBO();
 	initFonts(gWidth, gHeight);
 	initCubemap();
+	initGBuffer();
+	initGBufferShaders();
+	initFullscreenQuad();
+}
+void drawWorldPositionsOrNormals()
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+	glViewport(0, 0, gWidth, gHeight);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glUseProgram(gBufferShaderProgram);
+
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+
+	glBindVertexArray(vao[0]);
+	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
+	glBindVertexArray(0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+int renderMode = 1;
+void drawCubemapTonemappedWithMotionBlur() {
+};
+void drawCubemapWithMotionBlur() {};
+void drawLitArmadillo() {};
+void renderTextureFullscreen(GLuint textureID)
+{
+	glUseProgram(fullscreenShaderProgram);
+	glBindVertexArray(quadVAO);
+
+	// Bind the texture to unit 0
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+
+	// Set uniform
+	glUniform1i(glGetUniformLocation(fullscreenShaderProgram, "screenTexture"), 0);
+
+	// Draw fullscreen quad
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
+}
+
+void drawWorldPositions()
+{
+	drawWorldPositionsOrNormals();
+	renderTextureFullscreen(gPosition);
+}
+void drawNormals()
+{
+	drawWorldPositionsOrNormals();
+	renderTextureFullscreen(gNormal);
+}
+void drawCubemap()
+{
+	glDepthFunc(GL_LEQUAL);
+	glUseProgram(cubemapProgram);
+
+	glm::mat4 view = glm::mat4(glm::mat3(viewingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+	glUniform1f(exposureLoc, exposure);
+	glUniform1f(gammaLoc, gamma_val);
+
+	glBindVertexArray(cubemapVAO);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+	glBindVertexArray(0);
+	glDepthFunc(GL_LESS); // Reset depth function to default
+};
+void drawDeferredLighting() {};
+void renderPasses() {};
+void drawScene2()
+{
+	renderPasses();
+	switch (renderMode)
+	{
+	case 0: // Final result: tonemapped + motion blurred cubemap + lit armadillo
+		drawCubemapTonemappedWithMotionBlur();
+		drawLitArmadillo(); // forward or deferred
+		break;
+	case 1: // Only cubemap (no tone mapping)
+		drawCubemap();
+		break;
+	case 2: // World positions of armadillo
+		drawWorldPositions();
+		break;
+	case 3: // Normals of armadillo
+		drawNormals();
+		break;
+	case 4: // Deferred lighting of armadillo
+		drawDeferredLighting();
+		break;
+	case 5: // Composite: cubemap (no tone mapping) + lit armadillo
+		drawCubemap();
+		drawLitArmadillo();
+		break;
+	case 6: // Composite + motion blur (no tone mapping)
+		drawCubemapWithMotionBlur();
+		drawLitArmadillo();
+		break;
+	default:
+		break;
+	}
 }
 
 void drawScene()
@@ -851,12 +1086,11 @@ void renderInfo()
 {
 	renderText("Test", 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
 	renderText("Exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("Gamma:" + format_float(gamma_val), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("Render mode: " + currentRenderModeStr, gWidth - 5, gHeight - 30, 0.6, glm::vec3(1, 1, 0), true, false);
 }
-void display()
+void animateModel()
 {
-	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
 	static float angle = 0;
@@ -878,15 +1112,33 @@ void display()
 	glm::mat4 matRoll = glm::rotate<float>(glm::mat4(1.0), rollRad, glm::vec3(0.0, 1.0, 0.0));
 
 	modelingMatrix = modelingMatrix * matRoll;
+	angle += 0.5;
+}
+void display()
+{
+	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	drawScene();
+	animateModel();
+	drawScene2();
 
 	// Draw text
 	glDisable(GL_DEPTH_TEST);
 	renderInfo();
 	glEnable(GL_DEPTH_TEST);
+}
+void handleResize()
+{
+	if (glIsTexture(gPosition))
+		glDeleteTextures(1, &gPosition);
+	if (glIsTexture(gNormal))
+		glDeleteTextures(1, &gNormal);
+	if (glIsRenderbuffer(depthRBO))
+		glDeleteRenderbuffers(1, &depthRBO);
+	if (glIsFramebuffer(gBuffer))
+		glDeleteFramebuffers(1, &gBuffer);
 
-	angle += 0.5;
+	initGBuffer();
 }
 
 void reshape(GLFWwindow *window, int w, int h)
@@ -907,16 +1159,38 @@ void reshape(GLFWwindow *window, int w, int h)
 	glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(gWidth), 0.0f, static_cast<GLfloat>(gHeight));
 	glUseProgram(gProgram[2]);
 	glUniformMatrix4fv(glGetUniformLocation(gProgram[2], "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+	static bool firstTime = true;
+	if (firstTime)
+		return;
+	firstTime = false;
+	// Recreate G-buffer textures with new size
+	glDeleteTextures(1, &gPosition);
+	glDeleteTextures(1, &gNormal);
+
+	glGenTextures(1, &gPosition);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, w, h, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glGenTextures(1, &gNormal);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, w, h, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	// Update depth buffer size
+	GLuint depthRBO;
+	glGenRenderbuffers(1, &depthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
 }
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_Q && action == GLFW_PRESS)
 	{
 		glfwSetWindowShouldClose(window, GLFW_TRUE);
-	}
-	else if (key == GLFW_KEY_F && action == GLFW_PRESS)
-	{
-		// glShadeModel(GL_FLAT);
 	}
 	else if (key == GLFW_KEY_K)
 	{
@@ -926,14 +1200,80 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 			firstMouse = true;
 		}
 	}
+	else if (key == GLFW_KEY_UP && (action == GLFW_PRESS || action == GLFW_REPEAT))
+	{
+		exposure = min(128.0f, exposure * 2.0f);
+	}
+	else if (key == GLFW_KEY_DOWN && (action == GLFW_PRESS || action == GLFW_REPEAT))
+	{
+		exposure = max(1.0f, exposure / 2.0f);
+	}
+	else if (action == GLFW_PRESS)
+	{
+		switch (key)
+		{
+		case GLFW_KEY_0:
+			renderMode = 0;
+			currentRenderModeStr = "Final result";
+			break;
+		case GLFW_KEY_1:
+			renderMode = 1;
+			currentRenderModeStr = "Cubemap only";
+			break;
+		case GLFW_KEY_2:
+			renderMode = 2;
+			currentRenderModeStr = "World positions";
+			break;
+		case GLFW_KEY_3:
+			renderMode = 3;
+			currentRenderModeStr = "Normals";
+			break;
+		case GLFW_KEY_4:
+			renderMode = 4;
+			currentRenderModeStr = "Deferred lighting";
+			break;
+		case GLFW_KEY_5:
+			renderMode = 5;
+			currentRenderModeStr = "Composite (cubemap + lit)";
+			break;
+		case GLFW_KEY_6:
+			renderMode = 6;
+			currentRenderModeStr = "Composite + motion blur";
+			break;
+		default:
+			break;
+		}
+	}
 }
 
 void mainLoop(GLFWwindow *window)
 {
+	int currentWidth = gWidth;
+	int currentHeight = gHeight;
+
 	while (!glfwWindowShouldClose(window))
 	{
+		// Check if window was resized
+		int newWidth, newHeight;
+		glfwGetWindowSize(window, &newWidth, &newHeight);
+
+		// Render your scene
 		display();
+
+		// Swap buffers
 		glfwSwapBuffers(window);
+		if (newWidth != currentWidth || newHeight != currentHeight)
+		{
+			currentWidth = newWidth;
+			currentHeight = newHeight;
+			gWidth = currentWidth;
+			gHeight = currentHeight;
+
+			// Handle the resize
+			handleResize();
+		}
+
+		// Poll events (this includes resize events)
 		glfwPollEvents();
 	}
 }
