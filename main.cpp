@@ -127,6 +127,8 @@ GLuint gVertexAttribBuffer[2], gIndexBuffer[2], gTextVBO;
 GLint gInVertexLoc[2], gInNormalLoc[2];
 int gVertexDataSizeInBytes[2], gNormalDataSizeInBytes[2], gTextureDataSizeInBytes[2];
 
+GLuint deferredLightingShaderProgram;
+
 bool ParseObj(const string &fileName, int objId)
 {
 	fstream myfile;
@@ -469,70 +471,49 @@ void initTexture()
 	stbi_image_free(data);
 }
 
+GLuint createShaderProgram(const char *vertexPath, const char *fragmentPath)
+{
+	GLuint vs = createVS(vertexPath);
+	GLuint fs = createFS(fragmentPath);
+
+	GLuint program = glCreateProgram();
+	glAttachShader(program, vs);
+	glAttachShader(program, fs);
+	glLinkProgram(program);
+
+	GLint status;
+	glGetProgramiv(program, GL_LINK_STATUS, &status);
+	if (status != GL_TRUE)
+	{
+		char buffer[512];
+		glGetProgramInfoLog(program, 512, NULL, buffer);
+		std::cerr << "Shader program linking failed (" << vertexPath << ", " << fragmentPath << "):\n"
+				  << buffer << std::endl;
+		exit(-1);
+	}
+
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+
+	return program;
+}
 void initShaders()
 {
-	// Create the programs
+	// Create and link shader programs using the helper
+	gProgram[0] = createShaderProgram("vert.glsl", "frag.glsl");		   // Armadillo
+	gProgram[1] = createShaderProgram("vert_quad.glsl", "frag_quad.glsl"); // Background quad
+	gProgram[2] = createShaderProgram("vert_text.glsl", "frag_text.glsl"); // Text rendering
 
-	gProgram[0] = glCreateProgram(); // for armadillo
-	gProgram[1] = glCreateProgram(); // for background quad
-	gProgram[2] = glCreateProgram(); // for text rendering
+	gBufferShaderProgram = createShaderProgram("gBuffer.vert", "gBuffer.frag");
+	cubemapProgram = createShaderProgram("vert_cubemap.glsl", "frag_cubemap.glsl");
+	fullscreenShaderProgram = createShaderProgram("quad.vert", "quad.frag");
 
-	// Create the shaders for both programs
+	// Get uniform locations
+	glUseProgram(cubemapProgram);
 
-	// for armadillo
-	GLuint vs1 = createVS("vert.glsl"); // or vert2.glsl
-	GLuint fs1 = createFS("frag.glsl"); // or frag2.glsl
-
-	// for background quad
-	GLuint vs2 = createVS("vert_quad.glsl");
-	GLuint fs2 = createFS("frag_quad.glsl");
-
-	// for background quad
-	GLuint vs3 = createVS("vert_text.glsl");
-	GLuint fs3 = createFS("frag_text.glsl");
-
-	// Attach the shaders to the programs
-
-	glAttachShader(gProgram[0], vs1);
-	glAttachShader(gProgram[0], fs1);
-
-	glAttachShader(gProgram[1], vs2);
-	glAttachShader(gProgram[1], fs2);
-
-	glAttachShader(gProgram[2], vs3);
-	glAttachShader(gProgram[2], fs3);
-
-	// Link the programs
-
-	glLinkProgram(gProgram[0]);
-	GLint status;
-	glGetProgramiv(gProgram[0], GL_LINK_STATUS, &status);
-
-	if (status != GL_TRUE)
-	{
-		cout << "Program link failed" << endl;
-		exit(-1);
-	}
-
-	glLinkProgram(gProgram[1]);
-	glGetProgramiv(gProgram[1], GL_LINK_STATUS, &status);
-
-	if (status != GL_TRUE)
-	{
-		cout << "Program link failed" << endl;
-		exit(-1);
-	}
-
-	glLinkProgram(gProgram[2]);
-	glGetProgramiv(gProgram[2], GL_LINK_STATUS, &status);
-
-	if (status != GL_TRUE)
-	{
-		cout << "Program link failed" << endl;
-		exit(-1);
-	}
-
-	// Get the locations of the uniform variables from both programs
+	glUniform1i(glGetUniformLocation(cubemapProgram, "cubeSampler"), 0);
+	exposureLoc = glGetUniformLocation(cubemapProgram, "exposure");
+	gammaLoc = glGetUniformLocation(cubemapProgram, "gamma");
 
 	for (int i = 0; i < 2; ++i)
 	{
@@ -673,29 +654,6 @@ void initFullscreenQuad()
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 	glBindVertexArray(0);
-
-	// === Create Shader Program ===
-	GLuint vs = createVS("quad.vert"); // simple pass-through vertex shader
-	GLuint fs = createFS("quad.frag"); // sample texture and output color
-
-	fullscreenShaderProgram = glCreateProgram();
-	glAttachShader(fullscreenShaderProgram, vs);
-	glAttachShader(fullscreenShaderProgram, fs);
-	glLinkProgram(fullscreenShaderProgram);
-
-	// Check link status
-	GLint linked;
-	glGetProgramiv(fullscreenShaderProgram, GL_LINK_STATUS, &linked);
-	if (!linked)
-	{
-		GLchar log[1024];
-		glGetProgramInfoLog(fullscreenShaderProgram, sizeof(log), NULL, log);
-		std::cerr << "Fullscreen Shader Program link error:\n"
-				  << log << std::endl;
-	}
-
-	glDeleteShader(vs);
-	glDeleteShader(fs);
 }
 
 GLuint gBuffer;
@@ -736,6 +694,7 @@ void initGBuffer()
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+
 void initGBufferShaders()
 {
 	GLuint vs = createVS("gBuffer.vert");
@@ -814,18 +773,6 @@ void initCubemap()
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 	cubemapTexture = loadCubemap();
-	GLuint vs_cubemap = createVS("vert_cubemap.glsl");
-	GLuint fs_cubemap = createFS("frag_cubemap.glsl");
-	cubemapProgram = glCreateProgram();
-	glAttachShader(cubemapProgram, vs_cubemap);
-	glAttachShader(cubemapProgram, fs_cubemap);
-	glLinkProgram(cubemapProgram);
-
-	// Get uniform locations
-	glUseProgram(cubemapProgram);
-	glUniform1i(glGetUniformLocation(cubemapProgram, "cubeSampler"), 0);
-	exposureLoc = glGetUniformLocation(cubemapProgram, "exposure");
-	gammaLoc = glGetUniformLocation(cubemapProgram, "gamma");
 }
 void init()
 {
@@ -837,7 +784,6 @@ void init()
 	initFonts(gWidth, gHeight);
 	initCubemap();
 	initGBuffer();
-	initGBufferShaders();
 	initFullscreenQuad();
 }
 void drawWorldPositionsOrNormals()
@@ -911,7 +857,10 @@ void drawCubemap()
 	glBindVertexArray(0);
 	glDepthFunc(GL_LESS); // Reset depth function to default
 };
-void drawDeferredLighting() {};
+void drawDeferredLighting()
+{
+}
+
 void renderPasses() {};
 void drawScene2()
 {
