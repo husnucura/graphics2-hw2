@@ -3,9 +3,27 @@ in vec2 TexCoords;
 out vec4 FragColor;
 
 uniform sampler2D screenTexture;
+uniform int visualizeMode;
+uniform vec3 minPos;
+uniform vec3 maxPos;
 
 void main()
 {
-    vec3 texColor = texture(screenTexture, TexCoords).rgb;
-    FragColor = vec4(texColor, 1.0);
+    vec3 texValue = texture(screenTexture, TexCoords).rgb;
+
+    
+
+    if (length(texValue) < 0.001)
+        discard;
+
+    if (visualizeMode == 1) {
+        vec3 normalColor = texValue * 0.5 + 0.5;
+        FragColor = vec4(normalColor, 1.0);
+    }
+    else {
+        float minBound = -6;
+        float maxBound = 0;
+        vec3 normalizedPos = clamp( ((texValue - minBound) / (maxBound - minBound)), 0.0, 1.0);
+        FragColor = vec4(clamp(texValue+0.5,0.0,1.0), 1.0);
+    }
 }

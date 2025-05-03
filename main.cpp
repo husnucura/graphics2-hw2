@@ -72,6 +72,13 @@ bool middleMousePressed = false;
 GLuint gBufferShaderProgram;
 GLuint depthRBO;
 
+glm::vec3 lightPos = glm::vec3(2.0f, 4.0f, -2.0f);
+glm::vec3 lightColor = glm::vec3(1.0f, 0.85f, 0.6f);
+glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 0.0f);
+float minX = 1e6, maxX = -1e6;
+float minY = 1e6, maxY = -1e6;
+float minZ = 1e6, maxZ = -1e6;
+
 /// Holds all state information relevant to a character as loaded using FreeType
 struct Character
 {
@@ -455,30 +462,26 @@ void initTexture()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	// load the texture
-	int width, height, nrChannels;
-	unsigned char *data = stbi_load("haunted_library.jpg", &width, &height, &nrChannels, 0);
-	if (data)
-	{
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-		glGenerateMipmap(GL_TEXTURE_2D);
-	}
-	else
-	{
-		std::cout << "Failed to load texture" << std::endl;
-	}
-	stbi_image_free(data);
 }
 
 GLuint createShaderProgram(const char *vertexPath, const char *fragmentPath)
 {
-	GLuint vs = createVS(vertexPath);
-	GLuint fs = createFS(fragmentPath);
-
 	GLuint program = glCreateProgram();
-	glAttachShader(program, vs);
-	glAttachShader(program, fs);
+
+	if (vertexPath && std::strlen(vertexPath) > 0)
+	{
+		GLuint vs = createVS(vertexPath);
+		glAttachShader(program, vs);
+		glDeleteShader(vs);
+	}
+
+	if (fragmentPath && std::strlen(fragmentPath) > 0)
+	{
+		GLuint fs = createFS(fragmentPath);
+		glAttachShader(program, fs);
+		glDeleteShader(fs);
+	}
+
 	glLinkProgram(program);
 
 	GLint status;
@@ -487,16 +490,16 @@ GLuint createShaderProgram(const char *vertexPath, const char *fragmentPath)
 	{
 		char buffer[512];
 		glGetProgramInfoLog(program, 512, NULL, buffer);
-		std::cerr << "Shader program linking failed (" << vertexPath << ", " << fragmentPath << "):\n"
+		std::cerr << "Shader program linking failed ("
+				  << (vertexPath ? vertexPath : "nullptr") << ", "
+				  << (fragmentPath ? fragmentPath : "nullptr") << "):\n"
 				  << buffer << std::endl;
 		exit(-1);
 	}
 
-	glDeleteShader(vs);
-	glDeleteShader(fs);
-
 	return program;
 }
+
 void initShaders()
 {
 	// Create and link shader programs using the helper
@@ -508,14 +511,15 @@ void initShaders()
 	cubemapProgram = createShaderProgram("vert_cubemap.glsl", "frag_cubemap.glsl");
 	fullscreenShaderProgram = createShaderProgram("quad.vert", "quad.frag");
 
-	// Get uniform locations
+	deferredLightingShaderProgram = createShaderProgram("quad.vert", "lighting.frag");
+
 	glUseProgram(cubemapProgram);
 
 	glUniform1i(glGetUniformLocation(cubemapProgram, "cubeSampler"), 0);
 	exposureLoc = glGetUniformLocation(cubemapProgram, "exposure");
 	gammaLoc = glGetUniformLocation(cubemapProgram, "gamma");
 
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i < 1; ++i)
 	{
 		glUseProgram(gProgram[i]);
 
@@ -528,7 +532,7 @@ void initShaders()
 
 void initVBO()
 {
-	for (size_t t = 0; t < 2; t++) // 2 objects. t=0 is armadillo, t=1 is background quad.
+	for (size_t t = 0; t < 1; t++) // 2 objects. t=0 is armadillo, t=1 is background quad.
 	{
 		glGenVertexArrays(1, &vao[t]);
 		assert(vao[t] > 0);
@@ -558,10 +562,6 @@ void initVBO()
 		GLfloat *normalData = new GLfloat[gNormals[t].size() * 3];
 		GLfloat *textureData = new GLfloat[gTextures[t].size() * 2];
 		GLuint *indexData = new GLuint[gFaces[t].size() * 3];
-
-		float minX = 1e6, maxX = -1e6;
-		float minY = 1e6, maxY = -1e6;
-		float minZ = 1e6, maxZ = -1e6;
 
 		for (int i = 0; i < gVertices[t].size(); ++i)
 		{
@@ -656,15 +656,14 @@ void initFullscreenQuad()
 	glBindVertexArray(0);
 }
 
-GLuint gBuffer;
-GLuint gPosition, gNormal;
+GLuint gBuffer, gPosition, gNormal, gAlbedoSpec, rboDepth;
 
 void initGBuffer()
 {
+
 	glGenFramebuffers(1, &gBuffer);
 	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
 
-	// Position buffer
 	glGenTextures(1, &gPosition);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
@@ -672,7 +671,6 @@ void initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
 
-	// Normal buffer
 	glGenTextures(1, &gNormal);
 	glBindTexture(GL_TEXTURE_2D, gNormal);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
@@ -680,18 +678,25 @@ void initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
 
-	// Depth buffer	glGenRenderbuffers(1, &depthRBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, gWidth, gHeight);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+	glGenTextures(1, &gAlbedoSpec);
+	glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, gWidth, gHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec, 0);
 
-	// Set draw buffers
-	GLenum attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, attachments);
+	unsigned int attachments[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+	glDrawBuffers(3, attachments);
+
+	glGenRenderbuffers(1, &rboDepth);
+	glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, gWidth, gHeight);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		std::cerr << "G-Buffer not complete!" << std::endl;
-
+		std::cout << "Framebuffer not complete!" << std::endl;
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -786,10 +791,10 @@ void init()
 	initGBuffer();
 	initFullscreenQuad();
 }
-void drawWorldPositionsOrNormals()
+void geometryPass()
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
-	glViewport(0, 0, gWidth, gHeight);
+
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glUseProgram(gBufferShaderProgram);
@@ -797,11 +802,19 @@ void drawWorldPositionsOrNormals()
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+	// glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "eyePos"), 1, GL_FALSE, glm::value_ptr(eyePos));
+
+	/* glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, diffuseTexture);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, specularTexture); */
 
 	glBindVertexArray(vao[0]);
 	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 
+	glBindVertexArray(0);
+	glUseProgram(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -810,19 +823,51 @@ void drawCubemapTonemappedWithMotionBlur() {
 };
 void drawCubemapWithMotionBlur() {};
 void drawLitArmadillo() {};
-void renderTextureFullscreen(GLuint textureID)
+void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 {
 	glUseProgram(fullscreenShaderProgram);
 	glBindVertexArray(quadVAO);
 
-	// Bind the texture to unit 0
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, textureID);
-
-	// Set uniform
 	glUniform1i(glGetUniformLocation(fullscreenShaderProgram, "screenTexture"), 0);
+	glUniform1i(glGetUniformLocation(fullscreenShaderProgram, "visualizeMode"), visualizeMode);
 
-	// Draw fullscreen quad
+	if (visualizeMode == 2)
+	{
+
+		glm::vec3 minModel = glm::vec3(minX, minY, minZ);
+		glm::vec3 maxModel = glm::vec3(maxX, maxY, maxZ);
+
+		// 8 corners of AABB
+		std::vector<glm::vec3> corners = {
+			{minX, minY, minZ},
+			{minX, minY, maxZ},
+			{minX, maxY, minZ},
+			{minX, maxY, maxZ},
+			{maxX, minY, minZ},
+			{maxX, minY, maxZ},
+			{maxX, maxY, minZ},
+			{maxX, maxY, maxZ},
+		};
+
+		glm::vec3 transformedMin = glm::vec3(FLT_MAX);
+		glm::vec3 transformedMax = glm::vec3(-FLT_MAX);
+
+		for (const glm::vec3 &corner : corners)
+		{
+			glm::vec4 transformed = modelingMatrix * glm::vec4(corner, 1.0f);
+			glm::vec3 p = glm::vec3(transformed);
+
+			transformedMin = glm::min(transformedMin, p);
+			transformedMax = glm::max(transformedMax, p);
+		}
+
+		// Upload to shader
+		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(transformedMin));
+		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(transformedMax));
+	}
+
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
@@ -831,13 +876,14 @@ void renderTextureFullscreen(GLuint textureID)
 
 void drawWorldPositions()
 {
-	drawWorldPositionsOrNormals();
-	renderTextureFullscreen(gPosition);
+	geometryPass();
+	renderTextureFullscreen(gPosition, 2);
 }
+
 void drawNormals()
 {
-	drawWorldPositionsOrNormals();
-	renderTextureFullscreen(gNormal);
+	geometryPass();
+	renderTextureFullscreen(gNormal, 1);
 }
 void drawCubemap()
 {
@@ -855,16 +901,52 @@ void drawCubemap()
 	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
 	glDrawArrays(GL_TRIANGLES, 0, 36);
 	glBindVertexArray(0);
-	glDepthFunc(GL_LESS); // Reset depth function to default
+	glDepthFunc(GL_LESS);
 };
 void drawDeferredLighting()
 {
+	geometryPass();
+	// 1. First ensure we have a clean default framebuffer
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); // Render to default framebuffer
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// 2. Use the deferred lighting shader
+	glUseProgram(deferredLightingShaderProgram);
+	glBindVertexArray(quadVAO);
+
+	// 3. Bind G-buffer textures to texture units
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	GLint gPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "gPosition");
+	glUniform1i(gPosLoc, 0);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	GLint gNormLoc = glGetUniformLocation(deferredLightingShaderProgram, "gNormal");
+	glUniform1i(gNormLoc, 1);
+
+	// 4. Set lighting uniforms (cache locations for better performance)
+	GLint lightPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "lightPos");
+	GLint lightColorLoc = glGetUniformLocation(deferredLightingShaderProgram, "lightColor");
+	GLint viewPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "viewPos");
+	GLint exposureLoc = glGetUniformLocation(deferredLightingShaderProgram, "exposure");
+
+	glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
+	glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
+	glUniform3fv(viewPosLoc, 1, glm::value_ptr(eyePos)); // Use eyePos instead of cameraPos
+	glUniform1f(exposureLoc, exposure);
+
+	// 5. Draw fullscreen quad (ensure your quad covers [-1,1] in clip space)
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	// 6. Cleanup
+	glBindVertexArray(0);
+	glUseProgram(0);
 }
 
 void renderPasses() {};
 void drawScene2()
 {
-	renderPasses();
 	switch (renderMode)
 	{
 	case 0: // Final result: tonemapped + motion blurred cubemap + lit armadillo
@@ -885,7 +967,9 @@ void drawScene2()
 		break;
 	case 5: // Composite: cubemap (no tone mapping) + lit armadillo
 		drawCubemap();
-		drawLitArmadillo();
+		glEnable(GL_BLEND);
+		drawDeferredLighting();
+		glDisable(GL_BLEND);
 		break;
 	case 6: // Composite + motion blur (no tone mapping)
 		drawCubemapWithMotionBlur();
@@ -1042,30 +1126,43 @@ void animateModel()
 {
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
-	static float angle = 0;
-	float angleRad = (float)(angle / 180.0) * M_PI;
+	// Base translation
+	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0f, -6.0f));
 
-	// Compute the modeling matrix for the armadillo
-	glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(0.0f, 0.0f, -7.0f));
-	glm::mat4 matRx = glm::rotate<float>(glm::mat4(1.0), (-90. / 180.) * M_PI, glm::vec3(1.0, 0.0, 0.0));
-	glm::mat4 matRy = glm::rotate<float>(glm::mat4(1.0), (-90. / 180.) * M_PI, glm::vec3(0.0, 1.0, 0.0));
-	// modelingMatrix = matT * matRy * matRx;
-	modelingMatrix = matT;
+	// Static rotations (if needed)
+	glm::mat4 matRx = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+	glm::mat4 matRy = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
-	// Let's make some alternating roll rotation
-	static float rollDeg = 0;
-	static float changeRoll = 2.5;
-	float rollRad = (float)(rollDeg / 180.f) * M_PI;
-	rollDeg += changeRoll;
+	// Static variables to maintain state across frames
+	static float yawDeg = 0.0f;
+	static float changeYaw = 1.0;
 
-	glm::mat4 matRoll = glm::rotate<float>(glm::mat4(1.0), rollRad, glm::vec3(0.0, 1.0, 0.0));
+	// Define yaw limits
+	const float minYaw = -180.0f;
+	const float maxYaw = 180.0f;
 
-	modelingMatrix = modelingMatrix * matRoll;
-	angle += 0.5;
+	// Update yaw angle
+	yawDeg += changeYaw;
+
+	// Clamp yaw angle within limits
+	if (yawDeg > maxYaw)
+	{
+		yawDeg = minYaw;
+	}
+	// Convert yaw angle to radians
+	float yawRad = glm::radians(yawDeg);
+
+	// Create quaternion for yaw rotation
+	glm::quat yawQuat = glm::angleAxis(yawRad, glm::vec3(0.0f, 1.0f, 0.0f));
+	glm::mat4 matYaw = glm::toMat4(yawQuat);
+
+	// Combine transformations
+	modelingMatrix = matT * matYaw;
 }
+
 void display()
 {
-	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	animateModel();
@@ -1108,32 +1205,6 @@ void reshape(GLFWwindow *window, int w, int h)
 	glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(gWidth), 0.0f, static_cast<GLfloat>(gHeight));
 	glUseProgram(gProgram[2]);
 	glUniformMatrix4fv(glGetUniformLocation(gProgram[2], "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-	static bool firstTime = true;
-	if (firstTime)
-		return;
-	firstTime = false;
-	// Recreate G-buffer textures with new size
-	glDeleteTextures(1, &gPosition);
-	glDeleteTextures(1, &gNormal);
-
-	glGenTextures(1, &gPosition);
-	glBindTexture(GL_TEXTURE_2D, gPosition);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, w, h, 0, GL_RGB, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	glGenTextures(1, &gNormal);
-	glBindTexture(GL_TEXTURE_2D, gNormal);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, w, h, 0, GL_RGB, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	// Update depth buffer size
-	GLuint depthRBO;
-	glGenRenderbuffers(1, &depthRBO);
-	glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
 }
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
