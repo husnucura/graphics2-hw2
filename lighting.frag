@@ -29,9 +29,8 @@ void main()
     vec3 FragPos = texture(gPosition, TexCoords).rgb;
     vec3 Normal = normalize(texture(gNormal, TexCoords).rgb);
     
-    if(length(FragPos) == 0.0) {
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-        return;
+   if(length(FragPos) == 0.0) {
+    discard;
     }
 
     vec3 viewDir = normalize(viewPos - FragPos);

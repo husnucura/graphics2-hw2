@@ -10,10 +10,6 @@ uniform float gamma;
 void main()
 {    
     vec3 hdrColor = texture(cubeSampler, TexCoords).rgb;
-    
-    vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);
-    
-    mapped = pow(mapped, vec3(1.0/gamma));
-    
+    vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);    
     FragColor = vec4(mapped, 1.0);
 }

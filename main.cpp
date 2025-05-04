@@ -52,6 +52,8 @@ GLuint cubemapTexture;
 GLuint cubemapVAO, cubemapVBO;
 GLuint cubemapProgram;
 
+GLuint cubemapFBO, cubemapColorTex, cubemapDepthRBO;
+
 GLuint quadVAO = 0, quadVBO = 0;
 GLuint fullscreenShaderProgram = 0;
 
@@ -71,6 +73,9 @@ float fov = 45.0f;
 bool middleMousePressed = false;
 GLuint gBufferShaderProgram;
 GLuint depthRBO;
+
+GLuint compositeShaderProgram;
+GLuint lightingTex;
 
 glm::vec3 lightPos = glm::vec3(2.0f, 4.0f, -2.0f);
 glm::vec3 lightColor = glm::vec3(1.0f, 0.85f, 0.6f);
@@ -509,10 +514,11 @@ void initShaders()
 	gProgram[2] = createShaderProgram("vert_text.glsl", "frag_text.glsl"); // Text rendering
 
 	gBufferShaderProgram = createShaderProgram("gBuffer.vert", "gBuffer.frag");
-	cubemapProgram = createShaderProgram("vert_cubemap.glsl", "frag_cubemap.glsl");
+	cubemapProgram = createShaderProgram("cubemap.vert", "cubemap.frag");
 	fullscreenShaderProgram = createShaderProgram("quad.vert", "quad.frag");
 
 	deferredLightingShaderProgram = createShaderProgram("quad.vert", "lighting.frag");
+	compositeShaderProgram = createShaderProgram("quad.vert", "composite.frag");
 
 	glUseProgram(cubemapProgram);
 
@@ -728,6 +734,78 @@ void initGBufferShaders()
 	glDeleteShader(vs);
 	glDeleteShader(fs);
 }
+GLuint lightFBO, lightColorTex, lightDepthRBO;
+
+void initLightingFBO()
+{
+	// Create framebuffer if it doesn't exist
+	glGenFramebuffers(1, &lightFBO);
+
+	// Create texture to store the lighting result
+
+	glGenTextures(1, &lightColorTex);
+	glBindTexture(GL_TEXTURE_2D, lightColorTex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	// Allocate storage for the texture
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, nullptr);
+
+	// Create a depth renderbuffer if it doesn't exist
+
+	glGenRenderbuffers(1, &lightDepthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, lightDepthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, gWidth, gHeight);
+
+	// Bind framebuffer and attach textures
+	glBindFramebuffer(GL_FRAMEBUFFER, lightFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, lightColorTex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, lightDepthRBO);
+
+	// Check if the framebuffer is complete
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "ERROR::FRAMEBUFFER:: Lighting framebuffer is not complete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void initCubemapFBO()
+{
+	// Create framebuffer if it doesn't exist
+	glGenFramebuffers(1, &cubemapFBO);
+
+	// Create texture if it doesn't exist
+
+	glGenTextures(1, &cubemapColorTex);
+	glBindTexture(GL_TEXTURE_2D, cubemapColorTex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// Create renderbuffer if it doesn't exist
+
+	glGenRenderbuffers(1, &cubemapDepthRBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, cubemapDepthRBO);
+
+	// Resize the texture and renderbuffer with the new dimensions
+	glBindTexture(GL_TEXTURE_2D, cubemapColorTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, cubemapDepthRBO);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, gWidth, gHeight);
+
+	// Attach the texture and renderbuffer to the framebuffer
+	glBindFramebuffer(GL_FRAMEBUFFER, cubemapFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, cubemapColorTex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, cubemapDepthRBO);
+
+	// Check if the framebuffer is complete
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "ERROR::FRAMEBUFFER:: Cubemap framebuffer is not complete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
 
 void initCubemap()
 {
@@ -782,7 +860,9 @@ void initCubemap()
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 	cubemapTexture = loadCubemap();
+	initCubemapFBO();
 }
+
 void init()
 {
 	ParseObj("armadillo.obj", 0);
@@ -794,6 +874,7 @@ void init()
 	initCubemap();
 	initGBuffer();
 	initFullscreenQuad();
+	initLightingFBO();
 }
 void geometryPass()
 {
@@ -885,28 +966,51 @@ void drawNormals()
 	geometryPass();
 	renderTextureFullscreen(gNormal, 1);
 }
-void drawCubemap()
+void blitToScreen(GLuint sourceFBO)
 {
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFBO);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+	glBlitFramebuffer(
+		0, 0, gWidth, gHeight,
+		0, 0, gWidth, gHeight,
+		GL_COLOR_BUFFER_BIT,
+		GL_NEAREST);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+void drawCubemap(GLuint targetFBO = 0)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
+	glViewport(0, 0, gWidth, gHeight);
+
 	glDepthFunc(GL_LEQUAL);
 	glUseProgram(cubemapProgram);
 
 	glm::mat4 view = glm::mat4(glm::mat3(viewingMatrix));
 	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+
 	glUniform1f(exposureLoc, exposure);
 	glUniform1f(gammaLoc, gamma_val);
 
 	glBindVertexArray(cubemapVAO);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glDrawArrays(GL_TRIANGLES, 0, 36);
+
 	glBindVertexArray(0);
+	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glDepthFunc(GL_LESS);
-};
-void drawDeferredLighting()
+}
+
+void drawDeferredLighting(GLuint lightFBO = 0)
 {
 	geometryPass();
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, lightFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glUseProgram(deferredLightingShaderProgram);
@@ -933,7 +1037,46 @@ void drawDeferredLighting()
 	glBindVertexArray(0);
 	glUseProgram(0);
 }
-void renderPasses() {};
+void drawComposite()
+{
+	drawCubemap(cubemapFBO);
+
+	drawDeferredLighting(lightFBO);
+	blitToScreen(cubemapFBO);
+
+	glUseProgram(compositeShaderProgram);
+	glBindVertexArray(quadVAO);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, lightColorTex);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "lightingTexture"), 0);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gPosition"), 1);
+
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gNormal"), 2);
+
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture"), 3);
+
+	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "viewPos"), 1, glm::value_ptr(eyePos));
+	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "cameraFront"), 1, glm::value_ptr(eyeGaze));
+
+	glUniform1f(glGetUniformLocation(compositeShaderProgram, "exposure"), exposure);
+	glUniform1f(glGetUniformLocation(compositeShaderProgram, "reflectionStrength"), 0.5f);
+
+	// Render composite - NO BLENDING NEEDED
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	// Cleanup
+	glBindVertexArray(0);
+	glUseProgram(0);
+}
+
 void drawScene2()
 {
 	switch (renderMode)
@@ -955,7 +1098,7 @@ void drawScene2()
 		drawDeferredLighting();
 		break;
 	case 5: // Composite: cubemap (no tone mapping) + lit armadillo
-
+		drawComposite();
 		break;
 	case 6: // Composite + motion blur (no tone mapping)
 		drawCubemapWithMotionBlur();
@@ -1161,6 +1304,7 @@ void display()
 }
 void handleResize()
 {
+	// Cleanup G-buffer textures and renderbuffers
 	if (glIsTexture(gPosition))
 		glDeleteTextures(1, &gPosition);
 	if (glIsTexture(gNormal))
@@ -1170,7 +1314,26 @@ void handleResize()
 	if (glIsFramebuffer(gBuffer))
 		glDeleteFramebuffers(1, &gBuffer);
 
+	// Cleanup cubemap textures and framebuffer
+	if (glIsTexture(cubemapColorTex))
+		glDeleteTextures(1, &cubemapColorTex);
+	if (glIsRenderbuffer(cubemapDepthRBO))
+		glDeleteRenderbuffers(1, &cubemapDepthRBO);
+	if (glIsFramebuffer(cubemapFBO))
+		glDeleteFramebuffers(1, &cubemapFBO);
+
+	// Cleanup lighting FBO resources
+	if (glIsFramebuffer(lightFBO))
+		glDeleteFramebuffers(1, &lightFBO);
+	if (glIsTexture(lightColorTex))
+		glDeleteTextures(1, &lightColorTex);
+	if (glIsRenderbuffer(lightDepthRBO))
+		glDeleteRenderbuffers(1, &lightDepthRBO);
+
+	// Reinitialize all necessary resources after resizing
+	initCubemapFBO();
 	initGBuffer();
+	initLightingFBO(); // Make sure you initialize the lighting FBO as well
 }
 
 void reshape(GLFWwindow *window, int w, int h)
