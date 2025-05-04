@@ -262,6 +262,7 @@ bool ReadDataFromFile(
 
 	return true;
 }
+vector<float> tmp;
 
 GLuint createVS(const char *shaderName)
 {
@@ -568,6 +569,9 @@ void initVBO()
 			vertexData[3 * i] = gVertices[t][i].x;
 			vertexData[3 * i + 1] = gVertices[t][i].y;
 			vertexData[3 * i + 2] = gVertices[t][i].z;
+			tmp.push_back(gVertices[t][i].x);
+			tmp.push_back(gVertices[t][i].y);
+			tmp.push_back(gVertices[t][i].z);
 
 			minX = std::min(minX, gVertices[t][i].x);
 			maxX = std::max(maxX, gVertices[t][i].x);
@@ -793,6 +797,8 @@ void init()
 }
 void geometryPass()
 {
+	glEnable(GL_DEPTH_TEST);
+
 	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -836,36 +842,30 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 	if (visualizeMode == 2)
 	{
 
-		glm::vec3 minModel = glm::vec3(minX, minY, minZ);
-		glm::vec3 maxModel = glm::vec3(maxX, maxY, maxZ);
+		glm::vec3 minModel = glm::vec3(1e6, 1e6, 1e6);
+		glm::vec3 maxModel = glm::vec3(-1e6, -1e6, -1e6);
 
-		// 8 corners of AABB
-		std::vector<glm::vec3> corners = {
-			{minX, minY, minZ},
-			{minX, minY, maxZ},
-			{minX, maxY, minZ},
-			{minX, maxY, maxZ},
-			{maxX, minY, minZ},
-			{maxX, minY, maxZ},
-			{maxX, maxY, minZ},
-			{maxX, maxY, maxZ},
-		};
-
-		glm::vec3 transformedMin = glm::vec3(FLT_MAX);
-		glm::vec3 transformedMax = glm::vec3(-FLT_MAX);
-
-		for (const glm::vec3 &corner : corners)
+		int t = 0;
+		for (int i = 0; i < gVertices[t].size(); ++i)
 		{
-			glm::vec4 transformed = modelingMatrix * glm::vec4(corner, 1.0f);
-			glm::vec3 p = glm::vec3(transformed);
 
-			transformedMin = glm::min(transformedMin, p);
-			transformedMax = glm::max(transformedMax, p);
+			minModel.x = std::min(minModel.x, tmp[3 * i]);
+			maxModel.x = std::max(maxModel.x, tmp[3 * i]);
+			minModel.y = std::min(minModel.y, tmp[3 * i + 1]);
+			maxModel.y = std::max(maxModel.y, tmp[3 * i + 1]);
+			minModel.z = std::min(minModel.z, tmp[3 * i + 2]);
+			maxModel.z = std::max(maxModel.z, tmp[3 * i + 2]);
 		}
+		glm::vec4 transformed = modelingMatrix * glm::vec4(minModel, 1.0f);
+		minModel = glm::vec3(transformed);
+		transformed = modelingMatrix * glm::vec4(maxModel, 1.0f);
+		maxModel = glm::vec3(transformed);
 
 		// Upload to shader
-		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(transformedMin));
-		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(transformedMax));
+		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(minModel));
+		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
+		std::cout << "min" << minModel.x << "," << minModel.y << "," << minModel.z << std::endl;
+		std::cout << "max" << maxModel.x << "," << maxModel.y << "," << maxModel.z << std::endl;
 	}
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -906,15 +906,12 @@ void drawCubemap()
 void drawDeferredLighting()
 {
 	geometryPass();
-	// 1. First ensure we have a clean default framebuffer
-	glBindFramebuffer(GL_FRAMEBUFFER, 0); // Render to default framebuffer
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// 2. Use the deferred lighting shader
 	glUseProgram(deferredLightingShaderProgram);
 	glBindVertexArray(quadVAO);
 
-	// 3. Bind G-buffer textures to texture units
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
 	GLint gPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "gPosition");
@@ -925,25 +922,17 @@ void drawDeferredLighting()
 	GLint gNormLoc = glGetUniformLocation(deferredLightingShaderProgram, "gNormal");
 	glUniform1i(gNormLoc, 1);
 
-	// 4. Set lighting uniforms (cache locations for better performance)
-	GLint lightPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "lightPos");
-	GLint lightColorLoc = glGetUniformLocation(deferredLightingShaderProgram, "lightColor");
 	GLint viewPosLoc = glGetUniformLocation(deferredLightingShaderProgram, "viewPos");
 	GLint exposureLoc = glGetUniformLocation(deferredLightingShaderProgram, "exposure");
 
-	glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
-	glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
-	glUniform3fv(viewPosLoc, 1, glm::value_ptr(eyePos)); // Use eyePos instead of cameraPos
+	glUniform3fv(viewPosLoc, 1, glm::value_ptr(eyePos));
 	glUniform1f(exposureLoc, exposure);
 
-	// 5. Draw fullscreen quad (ensure your quad covers [-1,1] in clip space)
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
-	// 6. Cleanup
 	glBindVertexArray(0);
 	glUseProgram(0);
 }
-
 void renderPasses() {};
 void drawScene2()
 {
@@ -966,10 +955,7 @@ void drawScene2()
 		drawDeferredLighting();
 		break;
 	case 5: // Composite: cubemap (no tone mapping) + lit armadillo
-		drawCubemap();
-		glEnable(GL_BLEND);
-		drawDeferredLighting();
-		glDisable(GL_BLEND);
+
 		break;
 	case 6: // Composite + motion blur (no tone mapping)
 		drawCubemapWithMotionBlur();
@@ -1127,7 +1113,7 @@ void animateModel()
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
 	// Base translation
-	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0f, -6.0f));
+	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.1, 0.1f, -6.0f));
 
 	// Static rotations (if needed)
 	glm::mat4 matRx = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
