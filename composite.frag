@@ -19,18 +19,6 @@ void main()
     
     if(length(FragPos) == 0.0) {
         discard;
-        vec2 uv = TexCoords * 2.0 - 1.0;
-        
-        vec3 rayDir = normalize(vec3(uv.x, uv.y, 1.0)); 
-        vec3 cameraRight = normalize(cross(cameraFront, vec3(0.0, 1.0, 0.0)));
-        vec3 cameraUp = normalize(cross(cameraRight, cameraFront));
-        vec3 worldDir = rayDir.x * cameraRight + rayDir.y * cameraUp + rayDir.z * cameraFront;
-        
-        vec3 envColor = texture(cubemapTexture, worldDir).rgb;
-        envColor = vec3(1.0) - exp(-envColor * exposure);
-        
-        FragColor = vec4(envColor, 1.0);
-        return;
     }
     // Sample deferred lighting result
     vec3 lighting = texture(lightingTexture, TexCoords).rgb;

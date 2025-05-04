@@ -11,6 +11,11 @@ void main()
 {
     vec3 texValue = texture(screenTexture, TexCoords).rgb;
 
+    if(visualizeMode == 0){
+        FragColor = texture(screenTexture, TexCoords);
+        return;
+
+    }
     
 
     if(length(texValue) == 0.0) {

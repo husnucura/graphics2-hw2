@@ -160,6 +160,15 @@ int gVertexDataSizeInBytes[2], gNormalDataSizeInBytes[2], gTextureDataSizeInByte
 
 GLuint deferredLightingShaderProgram;
 
+GLuint motionBlurFBO, toneMapFBO;
+GLuint motionBlurTexture, toneMapTexture;
+GLuint motionBlurShader, toneMapShader;
+float blurAmount = 0.0f;
+float angularVelocity = 0.0f;
+glm::vec2 lastMouseOffset = glm::vec2(0.0f);
+double lastFrameTime = 0.0;
+float keyValue = 0.18f;
+bool gammaEnabled = true;
 bool ParseObj(const string &fileName, int objId)
 {
 	fstream myfile;
@@ -539,6 +548,9 @@ void initShaders()
 	deferredLightingShaderProgram = createShaderProgram("quad.vert", "lighting.frag");
 	compositeShaderProgram = createShaderProgram("quad.vert", "composite.frag");
 
+	motionBlurShader = createShaderProgram("quad.vert", "motion_blur.frag");
+	toneMapShader = createShaderProgram("quad.vert", "tone_mapping.frag");
+
 	glUseProgram(cubemapProgram);
 
 	glUniform1i(glGetUniformLocation(cubemapProgram, "cubeSampler"), 0);
@@ -881,7 +893,48 @@ void initCubemap()
 	cubemapTexture = loadCubemap();
 	initCubemapFBO();
 }
+unsigned int compositeFBO;
+unsigned int compositeTexture;
 
+void initComposite()
+{
+
+	glGenFramebuffers(1, &compositeFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, compositeFBO);
+
+	glGenTextures(1, &compositeTexture);
+	glBindTexture(GL_TEXTURE_2D, compositeTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, gWidth, gHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, compositeTexture, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "Composite framebuffer not complete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void initMotionBlurAndToneMapping()
+{
+	glGenFramebuffers(1, &motionBlurFBO);
+	glGenTextures(1, &motionBlurTexture);
+	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, motionBlurTexture, 0);
+
+	glGenFramebuffers(1, &toneMapFBO);
+	glGenTextures(1, &toneMapTexture);
+	glBindTexture(GL_TEXTURE_2D, toneMapTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, toneMapFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, toneMapTexture, 0);
+}
 void init()
 {
 	ParseObj("armadillo.obj", 0);
@@ -894,6 +947,8 @@ void init()
 	initGBuffer();
 	initFullscreenQuad();
 	initLightingFBO();
+	initMotionBlurAndToneMapping();
+	initComposite();
 }
 void geometryPass()
 {
@@ -929,8 +984,11 @@ void drawCubemapTonemappedWithMotionBlur() {
 };
 void drawCubemapWithMotionBlur() {};
 void drawLitArmadillo() {};
-void renderTextureFullscreen(GLuint textureID, int visualizeMode)
+void renderTexture(GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 {
+	glBindFramebuffer(GL_FRAMEBUFFER, outputFBO);
+	glViewport(0, 0, gWidth, gHeight);
+
 	glUseProgram(fullscreenShaderProgram);
 	glBindVertexArray(quadVAO);
 
@@ -941,15 +999,13 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 
 	if (visualizeMode == 2)
 	{
-
-		glm::vec3 minModel = glm::vec3(1e6, 1e6, 1e6);
-		glm::vec3 maxModel = glm::vec3(-1e6, -1e6, -1e6);
+		glm::vec3 minModel(1e6f);
+		glm::vec3 maxModel(-1e6f);
 
 		int t = 0;
 		bool azd = false;
 		for (int i = 0; i < gVertices[t].size(); ++i)
 		{
-
 			minModel.x = std::min(minModel.x, tmp[3 * i]);
 			maxModel.x = std::max(maxModel.x, tmp[3 * i]);
 			minModel.y = std::min(minModel.y, tmp[3 * i + 1]);
@@ -957,18 +1013,20 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 			minModel.z = std::min(minModel.z, tmp[3 * i + 2]);
 			maxModel.z = std::max(maxModel.z, tmp[3 * i + 2]);
 		}
+
 		glm::vec4 transformed = modelingMatrix * glm::vec4(minModel, 1.0f);
 		minModel = glm::vec3(transformed);
 		transformed = modelingMatrix * glm::vec4(maxModel, 1.0f);
 		maxModel = glm::vec3(transformed);
 
-		// Upload to shader
 		if (azd == true)
 			return;
+
 		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(minModel));
 		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
 		std::cout << "min" << minModel.x << "," << minModel.y << "," << minModel.z << std::endl;
 		std::cout << "max" << maxModel.x << "," << maxModel.y << "," << maxModel.z << std::endl;
+
 		azd = true;
 	}
 
@@ -976,32 +1034,43 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 
 	glBindVertexArray(0);
 	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void drawWorldPositions()
 {
 	geometryPass();
-	renderTextureFullscreen(gPosition, 2);
+	renderTexture(gPosition, 2);
 }
 
 void drawNormals()
 {
 	geometryPass();
-	renderTextureFullscreen(gNormal, 1);
+	renderTexture(gNormal, 1);
 }
-void blitToScreen(GLuint sourceFBO)
+void blitTo(GLuint sourceFBO, GLuint outputFBO = 0)
 {
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFBO);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	// Save currently bound framebuffers
+	GLint prevReadFBO = 0, prevDrawFBO = 0;
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFBO);
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDrawFBO);
 
+	// Bind desired FBOs for blitting
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFBO);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, outputFBO);
+
+	// Perform the blit
 	glBlitFramebuffer(
 		0, 0, gWidth, gHeight,
 		0, 0, gWidth, gHeight,
 		GL_COLOR_BUFFER_BIT,
 		GL_NEAREST);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	// Restore previous framebuffer bindings
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFBO);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFBO);
 }
+
 void drawCubemap(GLuint targetFBO = 0)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
@@ -1059,13 +1128,15 @@ void drawDeferredLighting(GLuint lightFBO = 0)
 
 	glBindVertexArray(0);
 	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
-void drawComposite()
+void drawComposite(unsigned int outputFBO = 0)
 {
-	drawCubemap(cubemapFBO);
 
+	drawCubemap(cubemapFBO);
 	drawDeferredLighting(lightFBO);
-	blitToScreen(cubemapFBO);
+	blitTo(cubemapFBO, outputFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, outputFBO);
 
 	glUseProgram(compositeShaderProgram);
 	glBindVertexArray(quadVAO);
@@ -1096,6 +1167,48 @@ void drawComposite()
 
 	glBindVertexArray(0);
 	glUseProgram(0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void drawCompositeAndMotionBlur()
+{
+	static double lastTime = glfwGetTime();
+	double currentTime = glfwGetTime();
+	float deltaTime = float(currentTime - lastTime);
+	lastTime = currentTime;
+
+	// Gradually reduce blur when camera stops moving
+	blurAmount = std::max(0.0f, blurAmount * exp(-deltaTime * 2.0f));
+
+	// Render composite to texture
+	drawComposite(compositeFBO);
+
+	// Apply motion blur
+	glUseProgram(motionBlurShader);
+
+	// Calculate blur direction (normalized)
+	glm::vec2 blurDir = glm::length(lastMouseOffset) > 0 ? glm::normalize(lastMouseOffset) : glm::vec2(0.0f);
+
+	// Set uniforms
+	glUniform2f(glGetUniformLocation(motionBlurShader, "blurDirection"), blurDir.x, blurDir.y);
+	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurAmount);
+	glUniform1f(glGetUniformLocation(motionBlurShader, "deltaTime"), deltaTime);
+	glm::vec2 texelSize = glm::vec2(1.0f / gWidth, 1.0f / gHeight);
+	glUniform2fv(glGetUniformLocation(motionBlurShader, "texelSize"), 1, glm::value_ptr(texelSize));
+	// Render with motion blur to motionBlurFBO
+	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// Use your renderTexture function with motionBlurShader
+	// Temporarily override the shader program
+	GLuint prevProgram = fullscreenShaderProgram;
+	fullscreenShaderProgram = motionBlurShader;
+	renderTexture(compositeTexture, 0, motionBlurFBO);
+	fullscreenShaderProgram = prevProgram; // Restore
+
+	// Blit to screen (assuming blitTo() copies motionBlurTexture to screen)
+	blitTo(motionBlurFBO);
 }
 
 void drawScene2()
@@ -1103,8 +1216,6 @@ void drawScene2()
 	switch (renderMode)
 	{
 	case 0: // Final result: tonemapped + motion blurred cubemap + lit armadillo
-		drawCubemapTonemappedWithMotionBlur();
-		drawLitArmadillo(); // forward or deferred
 		break;
 	case 1: // Only cubemap (no tone mapping)
 		drawCubemap();
@@ -1122,8 +1233,7 @@ void drawScene2()
 		drawComposite();
 		break;
 	case 6: // Composite + motion blur (no tone mapping)
-		drawCubemapWithMotionBlur();
-		drawLitArmadillo();
+		drawCompositeAndMotionBlur();
 		break;
 	default:
 		break;
@@ -1264,6 +1374,20 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 
 	// Calculate up vector from quaternion
 	eyeUp = finalOrientation * glm::vec3(0.0f, 1.0f, 0.0f);
+
+	float currentTime = glfwGetTime();
+	float deltaTime = currentTime - lastFrameTime;
+	lastFrameTime = currentTime;
+
+	glm::vec2 currentOffset = glm::vec2(xoffset, yoffset);
+	float currentVelocity = length(currentOffset);
+	angularVelocity = glm::mix(angularVelocity, currentVelocity, 0.1f);
+	lastMouseOffset = currentOffset;
+
+	blurAmount = glm::clamp(pow(angularVelocity, 1.0f), 0.0f, 1.0f);
+	std::
+			cout
+		<< angularVelocity << ",,,,,,,";
 }
 void renderInfo()
 {
@@ -1331,38 +1455,32 @@ void display()
 	renderInfo();
 	glEnable(GL_DEPTH_TEST);
 }
-void handleResize()
+void handleReshape()
 {
-	// Cleanup G-buffer textures and renderbuffers
-	if (glIsTexture(gPosition))
-		glDeleteTextures(1, &gPosition);
-	if (glIsTexture(gNormal))
-		glDeleteTextures(1, &gNormal);
-	if (glIsRenderbuffer(depthRBO))
-		glDeleteRenderbuffers(1, &depthRBO);
-	if (glIsFramebuffer(gBuffer))
-		glDeleteFramebuffers(1, &gBuffer);
+	std::vector<GLuint> textures = {gPosition, gNormal, cubemapColorTex, lightColorTex, motionBlurTexture, toneMapTexture, compositeTexture};
 
-	// Cleanup cubemap textures and framebuffer
-	if (glIsTexture(cubemapColorTex))
-		glDeleteTextures(1, &cubemapColorTex);
-	if (glIsRenderbuffer(cubemapDepthRBO))
-		glDeleteRenderbuffers(1, &cubemapDepthRBO);
-	if (glIsFramebuffer(cubemapFBO))
-		glDeleteFramebuffers(1, &cubemapFBO);
+	std::vector<GLuint> renderbuffers = {depthRBO, cubemapDepthRBO, lightDepthRBO};
 
-	// Cleanup lighting FBO resources
-	if (glIsFramebuffer(lightFBO))
-		glDeleteFramebuffers(1, &lightFBO);
-	if (glIsTexture(lightColorTex))
-		glDeleteTextures(1, &lightColorTex);
-	if (glIsRenderbuffer(lightDepthRBO))
-		glDeleteRenderbuffers(1, &lightDepthRBO);
+	std::vector<GLuint> framebuffers = {gBuffer, cubemapFBO, lightFBO, motionBlurFBO, toneMapFBO, compositeFBO};
+
+	for (GLuint tex : textures)
+		if (glIsTexture(tex))
+			glDeleteTextures(1, &tex);
+
+	for (GLuint rbo : renderbuffers)
+		if (glIsRenderbuffer(rbo))
+			glDeleteRenderbuffers(1, &rbo);
+
+	for (GLuint fbo : framebuffers)
+		if (glIsFramebuffer(fbo))
+			glDeleteFramebuffers(1, &fbo);
 
 	// Reinitialize all necessary resources after resizing
 	initCubemapFBO();
 	initGBuffer();
-	initLightingFBO(); // Make sure you initialize the lighting FBO as well
+	initLightingFBO();
+	initMotionBlurAndToneMapping();
+	initComposite();
 }
 
 void reshape(GLFWwindow *window, int w, int h)
@@ -1442,6 +1560,7 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 		case GLFW_KEY_6:
 			renderMode = 6;
 			currentRenderModeStr = "Composite + motion blur";
+			blurAmount = 0.0f;
 			break;
 		default:
 			keypress = false;
@@ -1490,7 +1609,7 @@ void mainLoop(GLFWwindow *window)
 			gHeight = currentHeight;
 
 			// Handle the resize
-			handleResize();
+			handleReshape();
 		}
 
 		// Poll events (this includes resize events)
