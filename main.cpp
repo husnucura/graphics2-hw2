@@ -35,6 +35,25 @@ GLuint vao[3];
 GLuint gProgram[3];
 GLuint texture;
 int gWidth = 640, gHeight = 480;
+double lastTime = glfwGetTime();
+int frameCount = 0;
+int fps = 0;
+bool vsync = true;
+std::string currentKeyPressed = "";
+double keyPressTimer = 0.0;
+
+void calculateFPS()
+{
+	double currentTime = glfwGetTime();
+	frameCount++;
+
+	if (currentTime - lastTime >= 1.0)
+	{
+		fps = double(frameCount) / (currentTime - lastTime);
+		frameCount = 0;
+		lastTime = currentTime;
+	}
+}
 
 GLint modelingMatrixLoc[2];
 GLint viewingMatrixLoc[2];
@@ -927,6 +946,7 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 		glm::vec3 maxModel = glm::vec3(-1e6, -1e6, -1e6);
 
 		int t = 0;
+		bool azd = false;
 		for (int i = 0; i < gVertices[t].size(); ++i)
 		{
 
@@ -943,10 +963,13 @@ void renderTextureFullscreen(GLuint textureID, int visualizeMode)
 		maxModel = glm::vec3(transformed);
 
 		// Upload to shader
+		if (azd == true)
+			return;
 		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(minModel));
 		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
 		std::cout << "min" << minModel.x << "," << minModel.y << "," << minModel.z << std::endl;
 		std::cout << "max" << maxModel.x << "," << maxModel.y << "," << maxModel.z << std::endl;
+		azd = true;
 	}
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -1069,10 +1092,8 @@ void drawComposite()
 	glUniform1f(glGetUniformLocation(compositeShaderProgram, "exposure"), exposure);
 	glUniform1f(glGetUniformLocation(compositeShaderProgram, "reflectionStrength"), 0.5f);
 
-	// Render composite - NO BLENDING NEEDED
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
-	// Cleanup
 	glBindVertexArray(0);
 	glUseProgram(0);
 }
@@ -1246,10 +1267,18 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 }
 void renderInfo()
 {
-	renderText("Test", 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
+	renderText("Fps:" + to_string(fps), 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
 	renderText("Exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
 	renderText("Gamma:" + format_float(gamma_val), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
 	renderText("Render mode: " + currentRenderModeStr, gWidth - 5, gHeight - 30, 0.6, glm::vec3(1, 1, 0), true, false);
+	if (!currentKeyPressed.empty() && glfwGetTime() - keyPressTimer <= 0.25)
+	{
+		renderText(currentKeyPressed, 0, 0, 0.6, glm::vec3(1, 1, 0), false, true);
+	}
+	else
+	{
+		currentKeyPressed = "";
+	}
 }
 void animateModel()
 {
@@ -1357,6 +1386,7 @@ void reshape(GLFWwindow *window, int w, int h)
 }
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
+	bool keypress = true;
 	if (key == GLFW_KEY_Q && action == GLFW_PRESS)
 	{
 		glfwSetWindowShouldClose(window, GLFW_TRUE);
@@ -1376,6 +1406,10 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	else if (key == GLFW_KEY_DOWN && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
 		exposure = max(1.0f, exposure / 2.0f);
+	}
+	else if (key == GLFW_KEY_V && action == GLFW_PRESS)
+	{
+		vsync = !vsync;
 	}
 	else if (action == GLFW_PRESS)
 	{
@@ -1410,8 +1444,23 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 			currentRenderModeStr = "Composite + motion blur";
 			break;
 		default:
+			keypress = false;
 			break;
 		}
+	}
+	else
+	{
+		keypress = false;
+	}
+
+	if (keypress)
+	{
+		const char *name = glfwGetKeyName(key, 0);
+		if (name == nullptr)
+			currentKeyPressed = "azd";
+		else
+			currentKeyPressed = std::string(name);
+		keyPressTimer = glfwGetTime();
 	}
 }
 
@@ -1427,7 +1476,9 @@ void mainLoop(GLFWwindow *window)
 		glfwGetWindowSize(window, &newWidth, &newHeight);
 
 		// Render your scene
+		glfwSwapInterval(vsync ? 1 : 0);
 		display();
+		calculateFPS();
 
 		// Swap buffers
 		glfwSwapBuffers(window);
