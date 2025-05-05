@@ -164,6 +164,7 @@ GLuint motionBlurFBO, toneMapFBO;
 GLuint motionBlurTexture, toneMapTexture;
 GLuint motionBlurShader, toneMapShader;
 float blurAmount = 0.0f;
+float blurEnabled = true;
 float angularVelocity = 0.0f;
 glm::vec2 lastMouseOffset = glm::vec2(0.0f);
 double lastFrameTime = 0.0;
@@ -984,18 +985,18 @@ void drawCubemapTonemappedWithMotionBlur() {
 };
 void drawCubemapWithMotionBlur() {};
 void drawLitArmadillo() {};
-void renderTexture(GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
+void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, outputFBO);
 	glViewport(0, 0, gWidth, gHeight);
 
-	glUseProgram(fullscreenShaderProgram);
+	glUseProgram(shaderProgram);
 	glBindVertexArray(quadVAO);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, textureID);
-	glUniform1i(glGetUniformLocation(fullscreenShaderProgram, "screenTexture"), 0);
-	glUniform1i(glGetUniformLocation(fullscreenShaderProgram, "visualizeMode"), visualizeMode);
+	glUniform1i(glGetUniformLocation(shaderProgram, "screenTexture"), 0);
+	glUniform1i(glGetUniformLocation(shaderProgram, "visualizeMode"), visualizeMode);
 
 	if (visualizeMode == 2)
 	{
@@ -1022,8 +1023,8 @@ void renderTexture(GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 		if (azd == true)
 			return;
 
-		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "minPos"), 1, glm::value_ptr(minModel));
-		glUniform3fv(glGetUniformLocation(fullscreenShaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
+		glUniform3fv(glGetUniformLocation(shaderProgram, "minPos"), 1, glm::value_ptr(minModel));
+		glUniform3fv(glGetUniformLocation(shaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
 		std::cout << "min" << minModel.x << "," << minModel.y << "," << minModel.z << std::endl;
 		std::cout << "max" << maxModel.x << "," << maxModel.y << "," << maxModel.z << std::endl;
 
@@ -1040,13 +1041,13 @@ void renderTexture(GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 void drawWorldPositions()
 {
 	geometryPass();
-	renderTexture(gPosition, 2);
+	renderTexture(fullscreenShaderProgram, gPosition, 2);
 }
 
 void drawNormals()
 {
 	geometryPass();
-	renderTexture(gNormal, 1);
+	renderTexture(fullscreenShaderProgram, gNormal, 1);
 }
 void blitTo(GLuint sourceFBO, GLuint outputFBO = 0)
 {
@@ -1192,7 +1193,7 @@ void drawCompositeAndMotionBlur()
 
 	// Set uniforms
 	glUniform2f(glGetUniformLocation(motionBlurShader, "blurDirection"), blurDir.x, blurDir.y);
-	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurAmount);
+	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurEnabled ? blurAmount : 0);
 	glUniform1f(glGetUniformLocation(motionBlurShader, "deltaTime"), deltaTime);
 	glm::vec2 texelSize = glm::vec2(1.0f / gWidth, 1.0f / gHeight);
 	glUniform2fv(glGetUniformLocation(motionBlurShader, "texelSize"), 1, glm::value_ptr(texelSize));
@@ -1200,12 +1201,7 @@ void drawCompositeAndMotionBlur()
 	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// Use your renderTexture function with motionBlurShader
-	// Temporarily override the shader program
-	GLuint prevProgram = fullscreenShaderProgram;
-	fullscreenShaderProgram = motionBlurShader;
-	renderTexture(compositeTexture, 0, motionBlurFBO);
-	fullscreenShaderProgram = prevProgram; // Restore
+	renderTexture(motionBlurShader, compositeTexture, 0, motionBlurFBO);
 
 	// Blit to screen (assuming blitTo() copies motionBlurTexture to screen)
 	blitTo(motionBlurFBO);
@@ -1529,13 +1525,20 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	{
 		vsync = !vsync;
 	}
+	else if (key == GLFW_KEY_B && action == GLFW_PRESS)
+	{
+		blurEnabled = !blurEnabled;
+		if (blurEnabled)
+			blurAmount = 0.0f;
+	}
+
 	else if (action == GLFW_PRESS)
 	{
 		switch (key)
 		{
 		case GLFW_KEY_0:
 			renderMode = 0;
-			currentRenderModeStr = "Final result";
+			currentRenderModeStr = "Tonemapped";
 			break;
 		case GLFW_KEY_1:
 			renderMode = 1;
@@ -1555,7 +1558,7 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 			break;
 		case GLFW_KEY_5:
 			renderMode = 5;
-			currentRenderModeStr = "Composite (cubemap + lit)";
+			currentRenderModeStr = "Composite (cubemap + model)";
 			break;
 		case GLFW_KEY_6:
 			renderMode = 6;
