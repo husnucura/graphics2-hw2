@@ -919,13 +919,30 @@ void initComposite()
 void initMotionBlurAndToneMapping()
 {
 	glGenFramebuffers(1, &motionBlurFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
+
 	glGenTextures(1, &motionBlurTexture);
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, motionBlurTexture, 0);
+
+	GLuint luminanceTexture;
+	glGenTextures(1, &luminanceTexture);
+	glBindTexture(GL_TEXTURE_2D, luminanceTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, gWidth, gHeight, 0, GL_RED, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, luminanceTexture, 0);
+
+	GLenum drawBuffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	glDrawBuffers(2, drawBuffers);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cerr << "Framebuffer not complete!" << std::endl;
+	}
 
 	glGenFramebuffers(1, &toneMapFBO);
 	glGenTextures(1, &toneMapTexture);
@@ -1172,46 +1189,40 @@ void drawComposite(unsigned int outputFBO = 0)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void drawCompositeAndMotionBlur()
+void drawCompositeAndMotionBlur(GLuint outputFBO = 0)
 {
 	static double lastTime = glfwGetTime();
 	double currentTime = glfwGetTime();
 	float deltaTime = float(currentTime - lastTime);
 	lastTime = currentTime;
 
-	// Gradually reduce blur when camera stops moving
 	blurAmount = std::max(0.0f, blurAmount * exp(-deltaTime * 2.0f));
 
-	// Render composite to texture
 	drawComposite(compositeFBO);
 
-	// Apply motion blur
 	glUseProgram(motionBlurShader);
 
-	// Calculate blur direction (normalized)
-	glm::vec2 blurDir = glm::length(lastMouseOffset) > 0 ? glm::normalize(lastMouseOffset) : glm::vec2(0.0f);
-
-	// Set uniforms
-	glUniform2f(glGetUniformLocation(motionBlurShader, "blurDirection"), blurDir.x, blurDir.y);
-	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurEnabled ? blurAmount : 0);
-	glUniform1f(glGetUniformLocation(motionBlurShader, "deltaTime"), deltaTime);
+	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurEnabled ? blurAmount : 0.0f);
 	glm::vec2 texelSize = glm::vec2(1.0f / gWidth, 1.0f / gHeight);
 	glUniform2fv(glGetUniformLocation(motionBlurShader, "texelSize"), 1, glm::value_ptr(texelSize));
-	// Render with motion blur to motionBlurFBO
+
 	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	renderTexture(motionBlurShader, compositeTexture, 0, motionBlurFBO);
 
-	// Blit to screen (assuming blitTo() copies motionBlurTexture to screen)
-	blitTo(motionBlurFBO);
+	blitTo(motionBlurFBO, outputFBO);
 }
 
+void drawFinal()
+{
+}
 void drawScene2()
 {
 	switch (renderMode)
 	{
-	case 0: // Final result: tonemapped + motion blurred cubemap + lit armadillo
+	case 0:
+		drawFinal();
 		break;
 	case 1: // Only cubemap (no tone mapping)
 		drawCubemap();
