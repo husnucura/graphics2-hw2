@@ -447,7 +447,7 @@ void initFonts(int windowWidth, int windowHeight)
 }
 unsigned int loadCubemap()
 {
-	std::string folder = "cubemap3/";
+	std::string folder = "cubemap/";
 	std::vector<std::string> faces = {
 		"px.hdr",
 		"nx.hdr",
@@ -467,7 +467,7 @@ unsigned int loadCubemap()
 		if (data)
 		{
 			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i,
-						 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, data);
+						 0, GL_RGB32F, width, height, 0, GL_RGB, GL_FLOAT, data);
 			stbi_image_free(data);
 			std::cout << "Loaded cubemap face: " << faces[i] << std::endl;
 		}
@@ -905,7 +905,7 @@ void initComposite()
 
 	glGenTextures(1, &compositeTexture);
 	glBindTexture(GL_TEXTURE_2D, compositeTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, gWidth, gHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, compositeTexture, 0);
@@ -923,7 +923,7 @@ void initMotionBlurAndToneMapping()
 
 	glGenTextures(1, &motionBlurTexture);
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -947,7 +947,7 @@ void initMotionBlurAndToneMapping()
 
 	glGenTextures(1, &toneMapTexture);
 	glBindTexture(GL_TEXTURE_2D, toneMapTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, toneMapTexture, 0);
@@ -994,6 +994,8 @@ int renderMode = 0;
 void drawLitArmadillo() {};
 void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 {
+	bool wasBlending = glIsEnabled(GL_BLEND);
+	glDisable(GL_BLEND);
 	glBindFramebuffer(GL_FRAMEBUFFER, outputFBO);
 	glViewport(0, 0, gWidth, gHeight);
 
@@ -1022,6 +1024,8 @@ void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GL
 	glBindVertexArray(0);
 	glUseProgram(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if (wasBlending)
+		glEnable(GL_BLEND);
 }
 
 void drawWorldPositions()
@@ -1205,7 +1209,7 @@ void drawCompositeAndMotionBlur(GLuint outputFBO = 0, float exps = exposure)
 	}
 }
 
-void drawFinal(GLuint outputFBO = 0, float exp = 2.0)
+void drawFinal(GLuint outputFBO = 0, float exp = 1.0)
 {
 	drawCompositeAndMotionBlur(motionBlurFBO, exp);
 

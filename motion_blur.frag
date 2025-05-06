@@ -38,8 +38,7 @@ void main() {
     float logLumMin = -11.5;
     float logLumMax = 4.0;
     float normalizedLogLum = (logLum - logLumMin) / (logLumMax - logLumMin);
-    FragColor = vec4(normalizedLogLum,0.0,0.0, normalizedLogLum);
-    FragColor = vec4(color.rgb, normalizedLogLum);
+    FragColor = vec4(color.rgb, logLum);
 
 
 }

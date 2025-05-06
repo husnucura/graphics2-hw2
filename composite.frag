@@ -29,8 +29,7 @@ void main()
     vec3 viewDir = normalize(viewPos - FragPos);
     vec3 reflectDir = reflect(-viewDir, Normal);
     
-    vec3 envColor;
-    envColor = texture(cubemapTexture, reflectDir).rgb;
+    vec3 envColor = texture(cubemapTexture, reflectDir).rgb;
  
     
     vec3 finalColor = lighting + envColor * reflectionStrength;

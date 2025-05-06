@@ -22,10 +22,8 @@ void main()
     float logLum = hdrData.a;
     
     if (toneMappingEnabled) {
-        float logLumMin = -11.5;
-        float logLumMax =4.0;
-        float avgNormalizedLogLum = textureLod(inputTexture, vec2(0.5), 100.0).a;
-        float avgLogLum = avgNormalizedLogLum * (logLumMax - logLumMin) + logLumMin;
+ 
+        float avgLogLum = textureLod(inputTexture, vec2(0.5), 100.0).a;
         float avgLum = exp(avgLogLum);
         
         hdrColor = toneMapReinhard(hdrColor, keyValue, avgLum);

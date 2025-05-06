@@ -23,8 +23,8 @@ vec3 albedo = vec3(0.8, 0.5, 0.3);
 void main()
 {
     Light lights[NUM_LIGHTS];
-    lights[0] = Light(vec3(0.0, 10.0, 25.0), vec3(1.0, 1.0, 1.0), 1.0);
-    lights[1] = Light(vec3(0.0, -10.0, 25.0), vec3(1.0, 1.0, 1.0), 1.0);
+    lights[0] = Light(vec3(0.0, 15.0, 25.0), vec3(1.0, 1.0, 1.0), 1.0);
+    lights[1] = Light(vec3(0.0, -15.0, 25.0), vec3(1.0, 1.0, 1.0), 1.0);
 
     vec3 FragPos = texture(gPosition, TexCoords).rgb;
     vec3 Normal = normalize(texture(gNormal, TexCoords).rgb);
