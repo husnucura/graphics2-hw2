@@ -1,12 +1,12 @@
 #version 330 core
 in vec2 TexCoords;
-
-layout(location = 0) out vec4 FragColor; 
-layout(location = 1) out float luminanceOutput;
+out vec4 FragColor;
 
 uniform sampler2D inputTexture;
 uniform float blurAmount;
 uniform vec2 texelSize;
+uniform float exposure;
+
 
 void main() {
     vec4 original = texture(inputTexture, TexCoords);
@@ -34,8 +34,12 @@ void main() {
     }
 
     float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float logLum = log(max(luminance, 1e-5));
+    float logLum = log(max(luminance, 1e-6));
+    float logLumMin = -11.5;
+    float logLumMax = 4.0;
+    float normalizedLogLum = (logLum - logLumMin) / (logLumMax - logLumMin);
+    FragColor = vec4(normalizedLogLum,0.0,0.0, normalizedLogLum);
+    FragColor = vec4(color.rgb, normalizedLogLum);
 
-    FragColor = color;
-    luminanceOutput = logLum;
+
 }

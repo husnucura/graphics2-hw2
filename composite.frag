@@ -2,41 +2,38 @@
 in vec2 TexCoords;
 out vec4 FragColor;
 
-uniform sampler2D gPosition;      // Position buffer from geometry pass
-uniform sampler2D gNormal;        // Normal buffer from geometry pass
-uniform sampler2D lightingTexture; // Deferred lighting result
-uniform samplerCube cubemapTexture; // Environment cubemap
-uniform vec3 viewPos;             // Camera position
-uniform vec3 cameraFront;
-uniform float exposure;           // Exposure control
-uniform float reflectionStrength; // Control reflection intensity (0.0-1.0)
+uniform sampler2D gPosition;
+uniform sampler2D gNormal;
+uniform sampler2D lightingTexture;
+
+uniform sampler2D cubemapTexture2D;
+uniform samplerCube cubemapTexture;
+
+uniform vec3 viewPos;
+uniform float reflectionStrength;
 
 void main()
 {
-    // Get position and normal from G-buffer
     vec3 FragPos = texture(gPosition, TexCoords).rgb;
-    vec3 Normal = texture(gNormal, TexCoords).rgb;
+    vec3 Normal = normalize(texture(gNormal, TexCoords).rgb);
     
-    if(length(FragPos) == 0.0) {
-        discard;
-    }
-    // Sample deferred lighting result
     vec3 lighting = texture(lightingTexture, TexCoords).rgb;
     
-    // Calculate reflection vector for environment sampling
+    if (length(FragPos) == 0.0) {
+
+        FragColor = texture(cubemapTexture2D, TexCoords);
+        return;
+  
+    }
+
     vec3 viewDir = normalize(viewPos - FragPos);
-    vec3 reflectDir = reflect(-viewDir, normalize(Normal));
+    vec3 reflectDir = reflect(-viewDir, Normal);
     
-    // Sample cubemap with reflection vector
-    vec3 envColor = texture(cubemapTexture, reflectDir).rgb;
+    vec3 envColor;
+    envColor = texture(cubemapTexture, reflectDir).rgb;
+ 
     
-    // Apply exposure to both components
-    lighting = vec3(1.0) - exp(-lighting * exposure);
-    envColor = vec3(1.0) - exp(-envColor * exposure);
+    vec3 finalColor = lighting + envColor * reflectionStrength;
     
-    // Combine lighting with environment reflection
-    vec3 finalColor = lighting + (envColor * reflectionStrength);
-    
-    // Output final color
     FragColor = vec4(finalColor, 1.0);
 }

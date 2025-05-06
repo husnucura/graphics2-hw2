@@ -30,7 +30,7 @@
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
 using namespace std;
-std::string currentRenderModeStr = "Default";
+std::string currentRenderModeStr = "Tonemapped";
 GLuint vao[3];
 GLuint gProgram[3];
 GLuint texture;
@@ -161,10 +161,11 @@ int gVertexDataSizeInBytes[2], gNormalDataSizeInBytes[2], gTextureDataSizeInByte
 GLuint deferredLightingShaderProgram;
 
 GLuint motionBlurFBO, toneMapFBO;
-GLuint motionBlurTexture, toneMapTexture;
+GLuint motionBlurTexture, toneMapTexture, luminanceTexture;
 GLuint motionBlurShader, toneMapShader;
 float blurAmount = 0.0f;
-float blurEnabled = true;
+bool blurEnabled = true;
+bool toneMappingEnabled = true;
 float angularVelocity = 0.0f;
 glm::vec2 lastMouseOffset = glm::vec2(0.0f);
 double lastFrameTime = 0.0;
@@ -918,39 +919,40 @@ void initComposite()
 
 void initMotionBlurAndToneMapping()
 {
+	// Motion blur FBO
 	glGenFramebuffers(1, &motionBlurFBO);
 	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 
+	// Motion blur texture (RGBA16F) - now storing log luminance in alpha
 	glGenTextures(1, &motionBlurTexture);
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 16);
+
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, motionBlurTexture, 0);
 
-	GLuint luminanceTexture;
-	glGenTextures(1, &luminanceTexture);
-	glBindTexture(GL_TEXTURE_2D, luminanceTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, gWidth, gHeight, 0, GL_RED, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, luminanceTexture, 0);
-
-	GLenum drawBuffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, drawBuffers);
+	GLenum drawBuffers[1] = {GL_COLOR_ATTACHMENT0};
+	glDrawBuffers(1, drawBuffers);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
-		std::cerr << "Framebuffer not complete!" << std::endl;
+		std::cerr << "Motion blur FBO not complete!" << std::endl;
 	}
 
 	glGenFramebuffers(1, &toneMapFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, toneMapFBO);
+
 	glGenTextures(1, &toneMapTexture);
 	glBindTexture(GL_TEXTURE_2D, toneMapTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glBindFramebuffer(GL_FRAMEBUFFER, toneMapFBO);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, toneMapTexture, 0);
 }
 void init()
@@ -997,10 +999,7 @@ void geometryPass()
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-int renderMode = 1;
-void drawCubemapTonemappedWithMotionBlur() {
-};
-void drawCubemapWithMotionBlur() {};
+int renderMode = 0;
 void drawLitArmadillo() {};
 void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GLuint outputFBO = 0)
 {
@@ -1089,7 +1088,7 @@ void blitTo(GLuint sourceFBO, GLuint outputFBO = 0)
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFBO);
 }
 
-void drawCubemap(GLuint targetFBO = 0)
+void drawCubemap(GLuint targetFBO = 0, float exp = exposure)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
 	glViewport(0, 0, gWidth, gHeight);
@@ -1101,7 +1100,7 @@ void drawCubemap(GLuint targetFBO = 0)
 	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(glGetUniformLocation(cubemapProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
 
-	glUniform1f(exposureLoc, exposure);
+	glUniform1f(exposureLoc, exp);
 	glUniform1f(gammaLoc, gamma_val);
 
 	glBindVertexArray(cubemapVAO);
@@ -1117,7 +1116,7 @@ void drawCubemap(GLuint targetFBO = 0)
 	glDepthFunc(GL_LESS);
 }
 
-void drawDeferredLighting(GLuint lightFBO = 0)
+void drawDeferredLighting(GLuint lightFBO = 0, float exp = exposure)
 {
 	geometryPass();
 	glBindFramebuffer(GL_FRAMEBUFFER, lightFBO);
@@ -1140,7 +1139,7 @@ void drawDeferredLighting(GLuint lightFBO = 0)
 	GLint exposureLoc = glGetUniformLocation(deferredLightingShaderProgram, "exposure");
 
 	glUniform3fv(viewPosLoc, 1, glm::value_ptr(eyePos));
-	glUniform1f(exposureLoc, exposure);
+	glUniform1f(exposureLoc, exp);
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
@@ -1148,21 +1147,22 @@ void drawDeferredLighting(GLuint lightFBO = 0)
 	glUseProgram(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
-void drawComposite(unsigned int outputFBO = 0)
+void drawComposite(unsigned int outputFBO = 0, float exp = exposure)
 {
+	drawCubemap(cubemapFBO, exp);
+	drawDeferredLighting(lightFBO, exp);
 
-	drawCubemap(cubemapFBO);
-	drawDeferredLighting(lightFBO);
-	blitTo(cubemapFBO, outputFBO);
 	glBindFramebuffer(GL_FRAMEBUFFER, outputFBO);
 
 	glUseProgram(compositeShaderProgram);
 	glBindVertexArray(quadVAO);
 
+	// Bind lighting output
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, lightColorTex);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "lightingTexture"), 0);
 
+	// Bind G-buffer textures
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gPosition"), 1);
@@ -1171,25 +1171,28 @@ void drawComposite(unsigned int outputFBO = 0)
 	glBindTexture(GL_TEXTURE_2D, gNormal);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gNormal"), 2);
 
+	// Bind cubemap output as texture, NOT blitted
 	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_2D, cubemapColorTex);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture2D"), 3);
+	glActiveTexture(GL_TEXTURE4);
 	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
-	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture"), 3);
+	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture"), 4);
 
+	// Camera uniforms
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "viewPos"), 1, glm::value_ptr(eyePos));
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "cameraFront"), 1, glm::value_ptr(eyeGaze));
 
-	glUniform1f(glGetUniformLocation(compositeShaderProgram, "exposure"), exposure);
 	glUniform1f(glGetUniformLocation(compositeShaderProgram, "reflectionStrength"), 0.5f);
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
-
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void drawCompositeAndMotionBlur(GLuint outputFBO = 0)
+void drawCompositeAndMotionBlur(GLuint outputFBO = 0, float exps = exposure)
 {
 	static double lastTime = glfwGetTime();
 	double currentTime = glfwGetTime();
@@ -1198,25 +1201,60 @@ void drawCompositeAndMotionBlur(GLuint outputFBO = 0)
 
 	blurAmount = std::max(0.0f, blurAmount * exp(-deltaTime * 2.0f));
 
-	drawComposite(compositeFBO);
+	drawComposite(compositeFBO, exps);
 
 	glUseProgram(motionBlurShader);
 
 	glUniform1f(glGetUniformLocation(motionBlurShader, "blurAmount"), blurEnabled ? blurAmount : 0.0f);
 	glm::vec2 texelSize = glm::vec2(1.0f / gWidth, 1.0f / gHeight);
 	glUniform2fv(glGetUniformLocation(motionBlurShader, "texelSize"), 1, glm::value_ptr(texelSize));
+	glUniform1f(glGetUniformLocation(motionBlurShader, "exposure"), exposure);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	renderTexture(motionBlurShader, compositeTexture, 0, motionBlurFBO);
 
-	blitTo(motionBlurFBO, outputFBO);
+	if (motionBlurFBO != outputFBO)
+	{
+		renderTexture(fullscreenShaderProgram, motionBlurTexture, outputFBO);
+
+		// blitTo(motionBlurFBO, outputFBO);
+	}
 }
 
-void drawFinal()
+void drawFinal(GLuint outputFBO = 0, float exp = 2.0)
 {
+	// First pass: motion blur (writes to motionBlurTexture with log luminance in alpha)
+	drawCompositeAndMotionBlur(motionBlurFBO, exp);
+
+	// Generate mipmaps for motion blur texture (contains log luminance in alpha)
+	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	// Tone mapping pass
+	glUseProgram(toneMapShader);
+
+	// Bind input texture
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
+	glUniform1i(glGetUniformLocation(toneMapShader, "inputTexture"), 0);
+
+	// Set uniforms
+	glUniform1f(glGetUniformLocation(toneMapShader, "keyValue"), keyValue);
+	glUniform1f(glGetUniformLocation(toneMapShader, "gammaValue"), gamma_val);
+	glUniform1i(glGetUniformLocation(toneMapShader, "toneMappingEnabled"), toneMappingEnabled);
+	glUniform1i(glGetUniformLocation(toneMapShader, "gammaEnabled"), gammaEnabled);
+
+	// Render to tone map FBO
+	glBindFramebuffer(GL_FRAMEBUFFER, toneMapFBO);
+	glClear(GL_COLOR_BUFFER_BIT);
+	renderTexture(toneMapShader, motionBlurTexture, 0, toneMapFBO);
+
+	// Finally blit to output (either screen or another FBO)
+	blitTo(toneMapFBO, outputFBO);
 }
+
 void drawScene2()
 {
 	switch (renderMode)
@@ -1392,16 +1430,21 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	lastMouseOffset = currentOffset;
 
 	blurAmount = glm::clamp(pow(angularVelocity, 1.0f), 0.0f, 1.0f);
-	std::
-			cout
-		<< angularVelocity << ",,,,,,,";
+}
+std::string boolToStr(bool a)
+{
+	return a ? "true" : "false";
 }
 void renderInfo()
 {
-	renderText("Fps:" + to_string(fps), 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
-	renderText("Exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
-	renderText("Gamma:" + format_float(gamma_val), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
-	renderText("Render mode: " + currentRenderModeStr, gWidth - 5, gHeight - 30, 0.6, glm::vec3(1, 1, 0), true, false);
+	renderText("fps:" + to_string(fps), 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
+	renderText("exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("gamma:" + format_float(gamma_val), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("key:" + format_float(keyValue), gWidth - 5, 50.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("motionblur:" + boolToStr(blurEnabled), gWidth - 5, 75.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("vsync:" + boolToStr(vsync), gWidth - 5, 100.0, 0.6, glm::vec3(1, 1, 0), true, true);
+
+	renderText(currentRenderModeStr, gWidth - 5, gHeight - 30, 0.6, glm::vec3(1, 1, 0), true, false);
 	if (!currentKeyPressed.empty() && glfwGetTime() - keyPressTimer <= 0.25)
 	{
 		renderText(currentKeyPressed, 0, 0, 0.6, glm::vec3(1, 1, 0), false, true);
@@ -1464,7 +1507,7 @@ void display()
 }
 void handleReshape()
 {
-	std::vector<GLuint> textures = {gPosition, gNormal, cubemapColorTex, lightColorTex, motionBlurTexture, toneMapTexture, compositeTexture};
+	std::vector<GLuint> textures = {gPosition, gNormal, cubemapColorTex, lightColorTex, motionBlurTexture, toneMapTexture, compositeTexture, luminanceTexture};
 
 	std::vector<GLuint> renderbuffers = {depthRBO, cubemapDepthRBO, lightDepthRBO};
 
@@ -1542,8 +1585,16 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 		if (blurEnabled)
 			blurAmount = 0.0f;
 	}
-
+	else if (key == GLFW_KEY_RIGHT && (action == GLFW_PRESS || action == GLFW_REPEAT))
+	{
+		keyValue = min(2.0f * keyValue, 5.0f);
+	}
+	else if (key == GLFW_KEY_LEFT && (action == GLFW_PRESS || action == GLFW_REPEAT))
+	{
+		keyValue = max(0.5f * keyValue, 0.18f);
+	}
 	else if (action == GLFW_PRESS)
+
 	{
 		switch (key)
 		{

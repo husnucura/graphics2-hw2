@@ -29,8 +29,8 @@ void main()
     vec3 FragPos = texture(gPosition, TexCoords).rgb;
     vec3 Normal = normalize(texture(gNormal, TexCoords).rgb);
     
-   if(length(FragPos) == 0.0) {
-    discard;
+    if(length(FragPos) == 0.0) {
+        discard;
     }
 
     vec3 viewDir = normalize(viewPos - FragPos);
@@ -53,7 +53,7 @@ void main()
         lighting += attenuation * (diffuse + specular);
     }
 
-    vec3 result = vec3(1.0) - exp(-lighting * exposure);
+    vec3 result = lighting * exposure;
     
     FragColor = vec4(result, 1.0);
 }
