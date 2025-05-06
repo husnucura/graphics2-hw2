@@ -536,6 +536,7 @@ GLuint createShaderProgram(const char *vertexPath, const char *fragmentPath)
 	return program;
 }
 
+GLuint tmpShader;
 void initShaders()
 {
 	// Create and link shader programs using the helper
@@ -552,6 +553,8 @@ void initShaders()
 
 	motionBlurShader = createShaderProgram("quad.vert", "motion_blur.frag");
 	toneMapShader = createShaderProgram("quad.vert", "tone_mapping.frag");
+
+	tmpShader = createShaderProgram("tmp.vert", "tmp.frag");
 
 	glUseProgram(cubemapProgram);
 
@@ -709,7 +712,7 @@ void initGBuffer()
 	// gPosition
 	glGenTextures(1, &gPosition);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
@@ -1007,8 +1010,8 @@ void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GL
 		glm::vec3 minModel(1e6f);
 		glm::vec3 maxModel(-1e6f);
 
-		minModel = glm::vec3(minX, minY, minZ + -6);
-		maxModel = glm::vec3(maxX, maxY, maxZ + -6);
+		minModel = glm::vec3(minX, minY, minZ - 6);
+		maxModel = glm::vec3(maxX, maxY, maxZ - 6);
 
 		glUniform3fv(glGetUniformLocation(shaderProgram, "minPos"), 1, glm::value_ptr(minModel));
 		glUniform3fv(glGetUniformLocation(shaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
@@ -1023,8 +1026,24 @@ void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GL
 
 void drawWorldPositions()
 {
-	geometryPass();
-	renderTexture(fullscreenShaderProgram, gPosition, 2);
+
+	glEnable(GL_DEPTH_TEST);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glUseProgram(tmpShader);
+
+	glUniformMatrix4fv(glGetUniformLocation(tmpShader, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(tmpShader, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(tmpShader, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+
+	glBindVertexArray(vao[0]);
+	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
+	glBindVertexArray(0);
+
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void drawNormals()
@@ -1411,9 +1430,6 @@ void animateModel()
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
 	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0f, -6.0f));
-
-	glm::mat4 matRx = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-	glm::mat4 matRy = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
 	static float yawDeg = 0.0f;
 	static float changeYaw = 1.0;
