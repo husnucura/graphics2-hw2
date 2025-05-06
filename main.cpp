@@ -161,7 +161,7 @@ int gVertexDataSizeInBytes[2], gNormalDataSizeInBytes[2], gTextureDataSizeInByte
 GLuint deferredLightingShaderProgram;
 
 GLuint motionBlurFBO, toneMapFBO;
-GLuint motionBlurTexture, toneMapTexture, luminanceTexture;
+GLuint motionBlurTexture, toneMapTexture;
 GLuint motionBlurShader, toneMapShader;
 float blurAmount = 0.0f;
 bool blurEnabled = true;
@@ -703,10 +703,10 @@ GLuint gBuffer, gPosition, gNormal, gAlbedoSpec, rboDepth;
 
 void initGBuffer()
 {
-
 	glGenFramebuffers(1, &gBuffer);
 	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
 
+	// gPosition
 	glGenTextures(1, &gPosition);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
@@ -714,6 +714,7 @@ void initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
 
+	// gNormal
 	glGenTextures(1, &gNormal);
 	glBindTexture(GL_TEXTURE_2D, gNormal);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, gWidth, gHeight, 0, GL_RGB, GL_FLOAT, NULL);
@@ -721,15 +722,9 @@ void initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
 
-	glGenTextures(1, &gAlbedoSpec);
-	glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, gWidth, gHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec, 0);
-
-	unsigned int attachments[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
-	glDrawBuffers(3, attachments);
+	// Set draw buffers
+	unsigned int attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	glDrawBuffers(2, attachments);
 
 	glGenRenderbuffers(1, &rboDepth);
 	glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
@@ -738,6 +733,7 @@ void initGBuffer()
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		std::cout << "Framebuffer not complete!" << std::endl;
+
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -919,11 +915,9 @@ void initComposite()
 
 void initMotionBlurAndToneMapping()
 {
-	// Motion blur FBO
 	glGenFramebuffers(1, &motionBlurFBO);
 	glBindFramebuffer(GL_FRAMEBUFFER, motionBlurFBO);
 
-	// Motion blur texture (RGBA16F) - now storing log luminance in alpha
 	glGenTextures(1, &motionBlurTexture);
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
@@ -983,12 +977,6 @@ void geometryPass()
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
 	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
-	// glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "eyePos"), 1, GL_FALSE, glm::value_ptr(eyePos));
-
-	/* glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, diffuseTexture);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, specularTexture); */
 
 	glBindVertexArray(vao[0]);
 	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
@@ -1019,32 +1007,11 @@ void renderTexture(GLuint shaderProgram, GLuint textureID, int visualizeMode, GL
 		glm::vec3 minModel(1e6f);
 		glm::vec3 maxModel(-1e6f);
 
-		int t = 0;
-		bool azd = false;
-		for (int i = 0; i < gVertices[t].size(); ++i)
-		{
-			minModel.x = std::min(minModel.x, tmp[3 * i]);
-			maxModel.x = std::max(maxModel.x, tmp[3 * i]);
-			minModel.y = std::min(minModel.y, tmp[3 * i + 1]);
-			maxModel.y = std::max(maxModel.y, tmp[3 * i + 1]);
-			minModel.z = std::min(minModel.z, tmp[3 * i + 2]);
-			maxModel.z = std::max(maxModel.z, tmp[3 * i + 2]);
-		}
-
-		glm::vec4 transformed = modelingMatrix * glm::vec4(minModel, 1.0f);
-		minModel = glm::vec3(transformed);
-		transformed = modelingMatrix * glm::vec4(maxModel, 1.0f);
-		maxModel = glm::vec3(transformed);
-
-		if (azd == true)
-			return;
+		minModel = glm::vec3(minX, minY, minZ + -6);
+		maxModel = glm::vec3(maxX, maxY, maxZ + -6);
 
 		glUniform3fv(glGetUniformLocation(shaderProgram, "minPos"), 1, glm::value_ptr(minModel));
 		glUniform3fv(glGetUniformLocation(shaderProgram, "maxPos"), 1, glm::value_ptr(maxModel));
-		std::cout << "min" << minModel.x << "," << minModel.y << "," << minModel.z << std::endl;
-		std::cout << "max" << maxModel.x << "," << maxModel.y << "," << maxModel.z << std::endl;
-
-		azd = true;
 	}
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -1157,12 +1124,10 @@ void drawComposite(unsigned int outputFBO = 0, float exp = exposure)
 	glUseProgram(compositeShaderProgram);
 	glBindVertexArray(quadVAO);
 
-	// Bind lighting output
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, lightColorTex);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "lightingTexture"), 0);
 
-	// Bind G-buffer textures
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, gPosition);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gPosition"), 1);
@@ -1171,7 +1136,6 @@ void drawComposite(unsigned int outputFBO = 0, float exp = exposure)
 	glBindTexture(GL_TEXTURE_2D, gNormal);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "gNormal"), 2);
 
-	// Bind cubemap output as texture, NOT blitted
 	glActiveTexture(GL_TEXTURE3);
 	glBindTexture(GL_TEXTURE_2D, cubemapColorTex);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture2D"), 3);
@@ -1179,7 +1143,6 @@ void drawComposite(unsigned int outputFBO = 0, float exp = exposure)
 	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
 	glUniform1i(glGetUniformLocation(compositeShaderProgram, "cubemapTexture"), 4);
 
-	// Camera uniforms
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "viewPos"), 1, glm::value_ptr(eyePos));
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "cameraFront"), 1, glm::value_ptr(eyeGaze));
 
@@ -1225,33 +1188,26 @@ void drawCompositeAndMotionBlur(GLuint outputFBO = 0, float exps = exposure)
 
 void drawFinal(GLuint outputFBO = 0, float exp = 2.0)
 {
-	// First pass: motion blur (writes to motionBlurTexture with log luminance in alpha)
 	drawCompositeAndMotionBlur(motionBlurFBO, exp);
 
-	// Generate mipmaps for motion blur texture (contains log luminance in alpha)
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
 	glGenerateMipmap(GL_TEXTURE_2D);
 
-	// Tone mapping pass
 	glUseProgram(toneMapShader);
 
-	// Bind input texture
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
 	glUniform1i(glGetUniformLocation(toneMapShader, "inputTexture"), 0);
 
-	// Set uniforms
 	glUniform1f(glGetUniformLocation(toneMapShader, "keyValue"), keyValue);
 	glUniform1f(glGetUniformLocation(toneMapShader, "gammaValue"), gamma_val);
 	glUniform1i(glGetUniformLocation(toneMapShader, "toneMappingEnabled"), toneMappingEnabled);
 	glUniform1i(glGetUniformLocation(toneMapShader, "gammaEnabled"), gammaEnabled);
 
-	// Render to tone map FBO
 	glBindFramebuffer(GL_FRAMEBUFFER, toneMapFBO);
 	glClear(GL_COLOR_BUFFER_BIT);
 	renderTexture(toneMapShader, motionBlurTexture, 0, toneMapFBO);
 
-	// Finally blit to output (either screen or another FBO)
 	blitTo(toneMapFBO, outputFBO);
 }
 
@@ -1262,22 +1218,22 @@ void drawScene2()
 	case 0:
 		drawFinal();
 		break;
-	case 1: // Only cubemap (no tone mapping)
+	case 1:
 		drawCubemap();
 		break;
-	case 2: // World positions of armadillo
+	case 2:
 		drawWorldPositions();
 		break;
-	case 3: // Normals of armadillo
+	case 3:
 		drawNormals();
 		break;
-	case 4: // Deferred lighting of armadillo
+	case 4:
 		drawDeferredLighting();
 		break;
-	case 5: // Composite: cubemap (no tone mapping) + lit armadillo
+	case 5:
 		drawComposite();
 		break;
-	case 6: // Composite + motion blur (no tone mapping)
+	case 6:
 		drawCompositeAndMotionBlur();
 		break;
 	default:
@@ -1317,7 +1273,6 @@ void drawScene()
 }
 void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color, bool right_aligned = false, bool bottom_aligned = false)
 {
-	// Calculate total width and height if alignment is enabled
 	GLfloat textWidth = 0.0f;
 	GLfloat maxHeight = 0.0f;
 
@@ -1326,7 +1281,7 @@ void renderText(const std::string &text, GLfloat x, GLfloat y, GLfloat scale, gl
 		for (char c : text)
 		{
 			Character ch = Characters[c];
-			textWidth += (ch.Advance >> 6) * scale; // advance in pixels
+			textWidth += (ch.Advance >> 6) * scale;
 			GLfloat h = ch.Size.y * scale;
 			if (h > maxHeight)
 				maxHeight = h;
@@ -1400,7 +1355,6 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	yaw += xoffset;
 	pitch += yoffset;
 
-	// Constrain pitch to avoid screen flipping
 	if (pitch > 89.0f)
 		pitch = 89.0f;
 	if (pitch < -89.0f)
@@ -1414,10 +1368,8 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 
 	glm::quat finalOrientation = yawQuat * pitchQuat;
 
-	// Calculate front vector from quaternion
 	eyeGaze = finalOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
 
-	// Calculate up vector from quaternion
 	eyeUp = finalOrientation * glm::vec3(0.0f, 1.0f, 0.0f);
 
 	float currentTime = glfwGetTime();
@@ -1458,37 +1410,28 @@ void animateModel()
 {
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 
-	// Base translation
-	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.1, 0.1f, -6.0f));
+	glm::mat4 matT = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0f, -6.0f));
 
-	// Static rotations (if needed)
 	glm::mat4 matRx = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 	glm::mat4 matRy = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
-	// Static variables to maintain state across frames
 	static float yawDeg = 0.0f;
 	static float changeYaw = 1.0;
 
-	// Define yaw limits
 	const float minYaw = -180.0f;
 	const float maxYaw = 180.0f;
 
-	// Update yaw angle
 	yawDeg += changeYaw;
 
-	// Clamp yaw angle within limits
 	if (yawDeg > maxYaw)
 	{
 		yawDeg = minYaw;
 	}
-	// Convert yaw angle to radians
 	float yawRad = glm::radians(yawDeg);
 
-	// Create quaternion for yaw rotation
 	glm::quat yawQuat = glm::angleAxis(yawRad, glm::vec3(0.0f, 1.0f, 0.0f));
 	glm::mat4 matYaw = glm::toMat4(yawQuat);
 
-	// Combine transformations
 	modelingMatrix = matT * matYaw;
 }
 
@@ -1500,39 +1443,68 @@ void display()
 	animateModel();
 	drawScene2();
 
-	// Draw text
 	glDisable(GL_DEPTH_TEST);
 	renderInfo();
 	glEnable(GL_DEPTH_TEST);
 }
 void handleReshape()
 {
-	std::vector<GLuint> textures = {gPosition, gNormal, cubemapColorTex, lightColorTex, motionBlurTexture, toneMapTexture, compositeTexture, luminanceTexture};
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+	std::vector<GLuint> textures = {gPosition, gNormal, cubemapColorTex,
+									lightColorTex, motionBlurTexture,
+									toneMapTexture, compositeTexture};
 
 	std::vector<GLuint> renderbuffers = {depthRBO, cubemapDepthRBO, lightDepthRBO};
 
-	std::vector<GLuint> framebuffers = {gBuffer, cubemapFBO, lightFBO, motionBlurFBO, toneMapFBO, compositeFBO};
+	std::vector<GLuint> framebuffers = {gBuffer, cubemapFBO, lightFBO,
+										motionBlurFBO, toneMapFBO, compositeFBO};
 
 	for (GLuint tex : textures)
+	{
 		if (glIsTexture(tex))
+		{
 			glDeleteTextures(1, &tex);
+		}
+	}
 
 	for (GLuint rbo : renderbuffers)
+	{
 		if (glIsRenderbuffer(rbo))
+		{
 			glDeleteRenderbuffers(1, &rbo);
+		}
+	}
 
 	for (GLuint fbo : framebuffers)
+	{
 		if (glIsFramebuffer(fbo))
+		{
 			glDeleteFramebuffers(1, &fbo);
+		}
+	}
 
-	// Reinitialize all necessary resources after resizing
-	initCubemapFBO();
-	initGBuffer();
-	initLightingFBO();
-	initMotionBlurAndToneMapping();
-	initComposite();
+	try
+	{
+		initGBuffer();
+		initLightingFBO();
+		initCubemapFBO();
+		initMotionBlurAndToneMapping();
+		initComposite();
+
+		glUseProgram(0);
+
+		glBindTexture(GL_TEXTURE_2D, motionBlurTexture);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << "Error during reshape: " << e.what() << std::endl;
+	}
 }
-
 void reshape(GLFWwindow *window, int w, int h)
 {
 	w = w < 1 ? 1 : w;
@@ -1546,7 +1518,6 @@ void reshape(GLFWwindow *window, int w, int h)
 	float fovyRad = (float)(45.0 / 180.0) * M_PI;
 	projectionMatrix = glm::perspective(fovyRad, (float)w / (float)h, 0.1f, 100.0f);
 
-	// Update viewing matrix with current eyeGaze
 	viewingMatrix = glm::lookAt(eyePos, eyePos + eyeGaze, eyeUp);
 	glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(gWidth), 0.0f, static_cast<GLfloat>(gHeight));
 	glUseProgram(gProgram[2]);
@@ -1655,16 +1626,13 @@ void mainLoop(GLFWwindow *window)
 
 	while (!glfwWindowShouldClose(window))
 	{
-		// Check if window was resized
 		int newWidth, newHeight;
 		glfwGetWindowSize(window, &newWidth, &newHeight);
 
-		// Render your scene
 		glfwSwapInterval(vsync ? 1 : 0);
 		display();
 		calculateFPS();
 
-		// Swap buffers
 		glfwSwapBuffers(window);
 		if (newWidth != currentWidth || newHeight != currentHeight)
 		{
@@ -1673,30 +1641,23 @@ void mainLoop(GLFWwindow *window)
 			gWidth = currentWidth;
 			gHeight = currentHeight;
 
-			// Handle the resize
 			handleReshape();
 		}
 
-		// Poll events (this includes resize events)
 		glfwPollEvents();
 	}
 }
 
-int main(int argc, char **argv) // Create Main Function For Bringing It All Together
+int main(int argc, char **argv)
 {
 	GLFWwindow *window;
 	if (!glfwInit())
 	{
 		exit(-1);
 	}
-
-	// glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-	// glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	// glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-	// glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 	window = glfwCreateWindow(gWidth, gHeight, "Simple Example", NULL, NULL);
 
@@ -1709,7 +1670,6 @@ int main(int argc, char **argv) // Create Main Function For Bringing It All Toge
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(1);
 
-	// Initialize GLEW to setup the OpenGL Function pointers
 	if (GLEW_OK != glewInit())
 	{
 		std::cout << "Failed to initialize GLEW" << std::endl;
