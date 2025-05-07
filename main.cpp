@@ -1169,7 +1169,7 @@ void drawComposite(unsigned int outputFBO = 0, float exp = exposure)
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "viewPos"), 1, glm::value_ptr(eyePos));
 	glUniform3fv(glGetUniformLocation(compositeShaderProgram, "cameraFront"), 1, glm::value_ptr(eyeGaze));
 
-	glUniform1f(glGetUniformLocation(compositeShaderProgram, "reflectionStrength"), 0.5f);
+	glUniform1f(glGetUniformLocation(compositeShaderProgram, "reflectionStrength"), 0.2f);
 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 
@@ -1582,7 +1582,7 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	}
 	else if (key == GLFW_KEY_RIGHT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
-		keyValue = min(2.0f * keyValue, 5.0f);
+		keyValue = min(2.0f * keyValue, 18.0f);
 	}
 	else if (key == GLFW_KEY_LEFT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
