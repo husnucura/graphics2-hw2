@@ -25,11 +25,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-std::string format_float(double val) {
-    std::ostringstream stream;
-    stream.precision(2);
-    stream << std::fixed << val;
-    return stream.str();
+std::string format_float(double val)
+{
+	std::ostringstream stream;
+	stream.precision(2);
+	stream << std::fixed << val;
+	return stream.str();
 }
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
@@ -701,41 +702,41 @@ void initFullscreenQuad()
 
 GLuint gBuffer, gPosition, gNormal, gAlbedoSpec, rboDepth;
 
-void initGBuffer() {
-    glGenFramebuffers(1, &gBuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+void initGBuffer()
+{
+	glGenFramebuffers(1, &gBuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
 
-    glGenTextures(1, &gPosition);
-    glBindTexture(GL_TEXTURE_2D, gPosition);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+	glGenTextures(1, &gPosition);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
 
-    glGenTextures(1, &gNormal);
-    glBindTexture(GL_TEXTURE_2D, gNormal);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
+	glGenTextures(1, &gNormal);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, gWidth, gHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
 
+	glGenRenderbuffers(1, &rboDepth);
+	glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, gWidth, gHeight);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
 
+	GLuint attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	glDrawBuffers(2, attachments);
 
-    glGenRenderbuffers(1, &rboDepth);
-    glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, gWidth, gHeight);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cout << "Framebuffer not complete! Exiting application." << std::endl;
+		exit(EXIT_FAILURE);
+	}
 
-    GLuint attachments[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-    glDrawBuffers(2, attachments);
-
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        std::cout << "Framebuffer not complete! Exiting application." << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
-    // Unbind framebuffer
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	// Unbind framebuffer
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void initGBufferShaders()
@@ -965,27 +966,25 @@ void init()
 }
 void geometryPass()
 {
-    glEnable(GL_DEPTH_TEST);
-    
-    glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
-    
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    
-    glUseProgram(gBufferShaderProgram);
-    
-    glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-    glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
-    glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+	glEnable(GL_DEPTH_TEST);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glUseProgram(gBufferShaderProgram);
+
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+	glUniformMatrix4fv(glGetUniformLocation(gBufferShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projectionMatrix));
 	glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(modelingMatrix)));
 	glUniformMatrix3fv(glGetUniformLocation(gBufferShaderProgram, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(normalMatrix));
 
-    
-
-    glBindVertexArray(vao[0]);
-    glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
-    glUseProgram(0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindVertexArray(vao[0]);
+	glDrawElements(GL_TRIANGLES, gFaces[0].size() * 3, GL_UNSIGNED_INT, 0);
+	glBindVertexArray(0);
+	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 int renderMode = 0;
@@ -1183,7 +1182,7 @@ void drawCompositeAndMotionBlur(GLuint outputFBO = 0, float exps = exposure)
 	float deltaTime = float(currentTime - lastTime);
 	lastTime = currentTime;
 
-	blurAmount = std::max(0.0f, blurAmount * exp(-deltaTime * 2.0f));
+	blurAmount = std::max(0.0f, blurAmount * exp(-deltaTime * 1.2f));
 
 	drawComposite(compositeFBO, exps);
 
@@ -1402,7 +1401,7 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	angularVelocity = glm::mix(angularVelocity, currentVelocity, 0.1f);
 	lastMouseOffset = currentOffset;
 
-	blurAmount = glm::clamp(pow(angularVelocity, 1.0f), 0.0f, 1.0f);
+	blurAmount = max(blurAmount, glm::clamp(pow(angularVelocity, 1.0f), 0.0f, 1.0f));
 }
 std::string boolToStr(bool a)
 {
