@@ -1417,6 +1417,10 @@ void renderInfo()
 	renderText("vsync:" + boolToStr(vsync), gWidth - 5, 100.0, 0.6, glm::vec3(1, 1, 0), true, true);
 
 	renderText(currentRenderModeStr, gWidth - 5, gHeight - 30, 0.6, glm::vec3(1, 1, 0), true, false);
+	if (middleMousePressed)
+	{
+		renderText("GLFW_MOUSE_BUTTON_MIDDLE", 0, 0, 0.6, glm::vec3(1, 1, 0), false, true);
+	}
 	if (!currentKeyPressed.empty() && glfwGetTime() - keyPressTimer <= 0.25)
 	{
 		renderText(currentKeyPressed, 0, 0, 0.6, glm::vec3(1, 1, 0), false, true);
@@ -1540,6 +1544,56 @@ void reshape(GLFWwindow *window, int w, int h)
 	glUseProgram(gProgram[2]);
 	glUniformMatrix4fv(glGetUniformLocation(gProgram[2], "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 }
+std::string GetKeyName(int key)
+{
+	switch (key)
+	{
+	case GLFW_KEY_UP:
+		return "GLFW_KEY_UP";
+	case GLFW_KEY_DOWN:
+		return "GLFW_KEY_DOWN";
+	case GLFW_KEY_LEFT:
+		return "GLFW_KEY_LEFT";
+	case GLFW_KEY_RIGHT:
+		return "GLFW_KEY_RIGHT";
+	case GLFW_KEY_Q:
+		return "GLFW_KEY_Q";
+	case GLFW_KEY_V:
+		return "GLFW_KEY_V";
+	case GLFW_KEY_B:
+		return "GLFW_KEY_B";
+	case GLFW_KEY_G:
+		return "GLFW_KEY_G";
+	case GLFW_KEY_0:
+		return "GLFW_KEY_0";
+	case GLFW_KEY_1:
+		return "GLFW_KEY_1";
+	case GLFW_KEY_2:
+		return "GLFW_KEY_2";
+	case GLFW_KEY_3:
+		return "GLFW_KEY_3";
+	case GLFW_KEY_4:
+		return "GLFW_KEY_4";
+	case GLFW_KEY_5:
+		return "GLFW_KEY_5";
+	case GLFW_KEY_6:
+		return "GLFW_KEY_6";
+	// Add more keys as needed
+	default:
+		return "";
+	}
+}
+
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+	if (button == GLFW_MOUSE_BUTTON_MIDDLE && (action == GLFW_PRESS || action == GLFW_RELEASE))
+	{
+		middleMousePressed = !middleMousePressed;
+		if (middleMousePressed)
+			firstMouse = true;
+	}
+}
+
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
 	bool keypress = true;
@@ -1547,14 +1601,7 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	{
 		glfwSetWindowShouldClose(window, GLFW_TRUE);
 	}
-	else if (key == GLFW_KEY_K)
-	{
-		if (action == GLFW_PRESS)
-		{
-			middleMousePressed = !middleMousePressed;
-			firstMouse = true;
-		}
-	}
+
 	else if (key == GLFW_KEY_UP && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
 		exposure = min(128.0f, exposure * 2.0f);
@@ -1579,11 +1626,11 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	}
 	else if (key == GLFW_KEY_RIGHT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
-		keyValue = min(2.0f * keyValue, 18.0f);
+		keyValue = min(keyValue + 0.09f, 1.08f);
 	}
 	else if (key == GLFW_KEY_LEFT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
-		keyValue = max(0.5f * keyValue, 0.18f);
+		keyValue = max(keyValue - 0.09f, 0.09f);
 	}
 	else if (action == GLFW_PRESS)
 
@@ -1631,11 +1678,8 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 
 	if (keypress)
 	{
-		const char *name = glfwGetKeyName(key, 0);
-		if (name == nullptr)
-			currentKeyPressed = "azd";
-		else
-			currentKeyPressed = std::string(name);
+
+		currentKeyPressed = GetKeyName(key);
 		keyPressTimer = glfwGetTime();
 	}
 }
@@ -1708,6 +1752,7 @@ int main(int argc, char **argv)
 	glfwSetKeyCallback(window, keyboard);
 	glfwSetWindowSizeCallback(window, reshape);
 	glfwSetCursorPosCallback(window, mouse_callback);
+	glfwSetMouseButtonCallback(window, mouse_button_callback);
 
 	reshape(window, gWidth, gHeight); // need to call this once ourselves
 	mainLoop(window);				  // this does not return unless the window is closed
