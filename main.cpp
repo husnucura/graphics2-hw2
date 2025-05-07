@@ -1233,6 +1233,10 @@ void drawFinal(GLuint outputFBO = 0, float exp = 1.0)
 
 void drawScene2()
 {
+	if (gammaEnabled)
+	{
+		glEnable(GL_FRAMEBUFFER_SRGB);
+	}
 	switch (renderMode)
 	{
 	case 0:
@@ -1258,6 +1262,10 @@ void drawScene2()
 		break;
 	default:
 		break;
+	}
+	if (gammaEnabled)
+	{
+		glDisable(GL_FRAMEBUFFER_SRGB);
 	}
 }
 

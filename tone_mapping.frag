@@ -31,9 +31,7 @@ void main()
         hdrColor = clamp(hdrColor, 0.0, 1.0);
     }
     
-    if (gammaEnabled) {
-        hdrColor = pow(hdrColor, vec3(1.0 / gammaValue));
-    }
+    
     
     FragColor = vec4(hdrColor, 1.0);
 }
