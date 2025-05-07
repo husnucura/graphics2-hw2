@@ -25,6 +25,7 @@ void main()
  
         float avgLogLum = textureLod(inputTexture, vec2(0.5), 100.0).a;
         float avgLum = exp(avgLogLum);
+        avgLum = floor(avgLum * 1000.0 + 0.5) / 1000.0;
         
         hdrColor = toneMapReinhard(hdrColor, keyValue, avgLum);
         hdrColor = clamp(hdrColor, 0.0, 1.0);

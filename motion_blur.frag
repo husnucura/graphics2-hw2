@@ -35,9 +35,6 @@ void main() {
 
     float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
     float logLum = log(max(luminance, 1e-6));
-    float logLumMin = -11.5;
-    float logLumMax = 4.0;
-    float normalizedLogLum = (logLum - logLumMin) / (logLumMax - logLumMin);
     FragColor = vec4(color.rgb, logLum);
 
 

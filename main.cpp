@@ -1414,7 +1414,7 @@ void renderInfo()
 {
 	renderText("fps:" + to_string(fps), 0, gHeight - 25, 0.6, glm::vec3(1, 1, 0));
 	renderText("exposure:" + format_float(exposure), gWidth - 5, 1.0, 0.6, glm::vec3(1, 1, 0), true, true);
-	renderText("gamma:" + format_float(gamma_val), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
+	renderText("gamma:" + format_float(gammaEnabled ? gamma_val : 1.0), gWidth - 5, 25.0, 0.6, glm::vec3(1, 1, 0), true, true);
 	renderText("key:" + format_float(keyValue), gWidth - 5, 50.0, 0.6, glm::vec3(1, 1, 0), true, true);
 	renderText("motionblur:" + boolToStr(blurEnabled), gWidth - 5, 75.0, 0.6, glm::vec3(1, 1, 0), true, true);
 	renderText("vsync:" + boolToStr(vsync), gWidth - 5, 100.0, 0.6, glm::vec3(1, 1, 0), true, true);
@@ -1575,6 +1575,10 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 		blurEnabled = !blurEnabled;
 		if (blurEnabled)
 			blurAmount = 0.0f;
+	}
+	else if (key == GLFW_KEY_G && action == GLFW_PRESS)
+	{
+		gammaEnabled = !gammaEnabled;
 	}
 	else if (key == GLFW_KEY_RIGHT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
