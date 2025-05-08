@@ -1586,7 +1586,8 @@ std::string GetKeyName(int key)
 		return "GLFW_KEY_5";
 	case GLFW_KEY_6:
 		return "GLFW_KEY_6";
-	// Add more keys as needed
+	case GLFW_KEY_SPACE:
+		return "GLFW_KEY_SPACE";
 	default:
 		return "";
 	}
@@ -1639,6 +1640,29 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 	else if (key == GLFW_KEY_LEFT && (action == GLFW_PRESS || action == GLFW_REPEAT))
 	{
 		keyValue = max(keyValue - 0.09f, 0.09f);
+	}
+
+	else if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+	{
+		static bool isFullscreen = false;
+		static int windowedX = 0, windowedY = 0;
+		static int windowedWidth = 0, windowedHeight = 0;
+		if (!isFullscreen)
+		{
+			glfwGetWindowPos(window, &windowedX, &windowedY);
+			glfwGetWindowSize(window, &windowedWidth, &windowedHeight);
+
+			GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+			const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+
+			glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+			isFullscreen = true;
+		}
+		else
+		{
+			glfwSetWindowMonitor(window, nullptr, windowedX, windowedY, windowedWidth, windowedHeight, 0);
+			isFullscreen = false;
+		}
 	}
 	else if (action == GLFW_PRESS)
 
