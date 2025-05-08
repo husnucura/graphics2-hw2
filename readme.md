@@ -29,11 +29,15 @@ Rendering Controls
 
     G: Toggle gamma correction
 
+    F: Toggle animation play/stop
+    
     Arrow Up/Down: Increase/decrease exposure (2x steps)
 
     Arrow Left/Right: Decrease/increase tone mapping key value
     
     Space: Toggle fullscreen/windowed
+
+
 
 Rendering Mode Selection
 

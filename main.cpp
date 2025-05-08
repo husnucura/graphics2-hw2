@@ -44,6 +44,7 @@ double lastTime = glfwGetTime();
 int frameCount = 0;
 int fps = 0;
 bool vsync = true;
+bool animationPlaying = true;
 std::string currentKeyPressed = "";
 double keyPressTimer = 0.0;
 
@@ -1450,7 +1451,8 @@ void animateModel()
 	const float minYaw = -180.0f;
 	const float maxYaw = 180.0f;
 
-	yawDeg += changeYaw;
+	if (animationPlaying)
+		yawDeg += changeYaw;
 
 	if (yawDeg > maxYaw)
 	{
@@ -1588,6 +1590,8 @@ std::string GetKeyName(int key)
 		return "GLFW_KEY_6";
 	case GLFW_KEY_SPACE:
 		return "GLFW_KEY_SPACE";
+	case GLFW_KEY_F:
+		return "GLFW_KEY_F";
 	default:
 		return "";
 	}
@@ -1663,6 +1667,10 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
 			glfwSetWindowMonitor(window, nullptr, windowedX, windowedY, windowedWidth, windowedHeight, 0);
 			isFullscreen = false;
 		}
+	}
+	else if (key == GLFW_KEY_F && action == GLFW_PRESS)
+	{
+		animationPlaying = !animationPlaying;
 	}
 	else if (action == GLFW_PRESS)
 
